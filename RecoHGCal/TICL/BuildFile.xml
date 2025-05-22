@@ -5,6 +5,7 @@
 <use name="Geometry/HGCalCommonData"/>
 <use name="PhysicsTools/TensorFlow"/>
 <use name="PhysicsTools/ONNXRuntime"/>
+<use name="PhysicsTools/XGBoost" />
 <export>
   <lib name="1"/>
 </export>

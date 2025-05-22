@@ -13,7 +13,7 @@ GeneralInterpretationAlgo::GeneralInterpretationAlgo(const edm::ParameterSet &co
     : TICLInterpretationAlgoBase(conf, cc),
       del_tk_ts_layer1_(conf.getParameter<double>("delta_tk_ts_layer1")),
       del_tk_ts_int_(conf.getParameter<double>("delta_tk_ts_interface")),
-      timing_quality_threshold_(conf.getParameter<double>("timing_quality_threshold")) {}
+      timing_quality_threshold_(conf.getParameter<double>("timing_quality_threshold")){}
 
 void GeneralInterpretationAlgo::initialize(const HGCalDDDConstants *hgcons,
                                            const hgcal::RecHitTools rhtools,
@@ -85,9 +85,10 @@ Vector GeneralInterpretationAlgo::propagateTrackster(const Trackster &t,
 
 void GeneralInterpretationAlgo::findTrackstersInWindow(const MultiVectorManager<Trackster> &tracksters,
                                                        const std::vector<std::pair<Vector, unsigned>> &seedingCollection,
+						       const std::vector<float> &Delta,
                                                        const std::array<TICLLayerTile, 2> &tracksterTiles,
                                                        const std::vector<Vector> &tracksterPropPoints,
-                                                       const float delta,
+                                                       const float delta_old,
                                                        unsigned trackstersSize,
                                                        std::vector<std::vector<unsigned>> &resultCollection,
                                                        bool useMask = false) {
@@ -97,9 +98,17 @@ void GeneralInterpretationAlgo::findTrackstersInWindow(const MultiVectorManager<
   // indices found close to the i-th object in the seedingCollection.
   // If specified, Tracksters are masked once found as close to an object.
   std::vector<int> mask(trackstersSize, 0);
-  const float delta2 = delta * delta;
-
+  //const float delta2 = delta * delta;
+  size_t idx = 0;  
   for (auto &i : seedingCollection) {
+    //const float delta = sqrt(Delta[idx]);
+    const float delta = sqrt(std::expm1(Delta[idx]));
+
+    //std::cout<< " ======== here dR ======== " << delta << std::endl;
+    const float delta2 = delta * delta;
+    std::cout<< " ======== here dR ======== " << delta2 << std::endl;
+
+    ++idx;
     float seed_eta = i.first.Eta();
     float seed_phi = i.first.Phi();
     unsigned seedId = i.second;
@@ -220,10 +229,14 @@ void GeneralInterpretationAlgo::makeCandidates(const Inputs &input,
   // to look for potential linkages in the appropriate tiles
   std::vector<std::pair<Vector, unsigned>> trackPColl;     // propagated track points and index of track in collection
   std::vector<std::pair<Vector, unsigned>> tkPropIntColl;  // tracks propagated to lastLayerEE
-
+  std::vector<float> trkDelataR1;
+  std::vector<float> trkDelataR2;
+  
   trackPColl.reserve(tracks.size());
   tkPropIntColl.reserve(tracks.size());
-
+  trkDelataR1.reserve(tracks.size());
+  trkDelataR2.reserve(tracks.size());
+  
   std::array<TICLLayerTile, 2> tracksterPropTiles = {};  // all Tracksters, propagated to layer 1
   std::array<TICLLayerTile, 2> tsPropIntTiles = {};      // all Tracksters, propagated to lastLayerEE
 
@@ -244,26 +257,53 @@ void GeneralInterpretationAlgo::makeCandidates(const Inputs &input,
   });
 
   for (auto const i : candidateTrackIds) {
+    float track_time = 0.f;
+    //float track_timeErr = 0.f;
+    float track_quality = 0.f;
+    float track_beta = 0.f;
+    GlobalPoint track_MtdPos{0.f, 0.f, 0.f};
+    if (useMTDTiming) {
+      auto const &inputTimingView = (*inputTiming_h).const_view();
+      track_time = inputTimingView.time()[i];
+      //track_timeErr = inputTimingView.timeErr()[i];
+      track_quality = inputTimingView.MVAquality()[i];
+      track_beta = inputTimingView.beta()[i];
+      track_MtdPos = {
+          inputTimingView.posInMTD_x()[i], inputTimingView.posInMTD_y()[i], inputTimingView.posInMTD_z()[i]};
+    }
     const auto &tk = tracks[i];
+    reco::TrackRef trackref = reco::TrackRef(tkH, i);
     int iSide = int(tk.eta() > 0);
     const auto &fts = trajectoryStateTransform::outerFreeState((tk), bFieldProd);
     // to the HGCal front
     const auto &tsos = prop.propagate(fts, firstDisk_[iSide]->surface());
     if (tsos.isValid()) {
+      const auto& globalPos1 = tsos.globalPosition();
+      const auto& globalMom1 = tsos.globalMomentum();      
+      AlgebraicMatrix55 localErrorMatrix1 = tsos.localError().matrix();
+      float deltaR1 = deltaREstimator.evaluateDeltaR(tk, trackref, globalPos1, globalMom1, localErrorMatrix1, track_time, track_beta, track_quality, track_MtdPos );
       Vector trackP(tsos.globalPosition().x(), tsos.globalPosition().y(), tsos.globalPosition().z());
       trackPColl.emplace_back(trackP, i);
+      trkDelataR1.emplace_back(deltaR1);
     }
     // to lastLayerEE
     const auto &tsos_int = prop.propagate(fts, interfaceDisk_[iSide]->surface());
     if (tsos_int.isValid()) {
+      const auto& globalPos2 = tsos.globalPosition();
+      const auto& globalMom2 = tsos.globalMomentum();
+      AlgebraicMatrix55 localErrorMatrix2 = tsos.localError().matrix();
+      float deltaR2 = deltaREstimator.evaluateDeltaR(tk, trackref, globalPos2, globalMom2, localErrorMatrix2, track_time, track_beta, track_quality, track_MtdPos );
       Vector trackP(tsos_int.globalPosition().x(), tsos_int.globalPosition().y(), tsos_int.globalPosition().z());
       tkPropIntColl.emplace_back(trackP, i);
+      trkDelataR2.emplace_back(deltaR2);
     }
   }  // Tracks
   tkPropIntColl.shrink_to_fit();
   trackPColl.shrink_to_fit();
   candidateTrackIds.shrink_to_fit();
-
+  trkDelataR1.shrink_to_fit();
+  trkDelataR2.shrink_to_fit();
+  
   // Propagate tracksters
 
   // Record postions of all tracksters propagated to layer 1 and lastLayerEE,
@@ -297,12 +337,12 @@ void GeneralInterpretationAlgo::makeCandidates(const Inputs &input,
   // step 1: tracks -> all tracksters, at firstLayerEE
   std::vector<std::vector<unsigned>> tsNearTk(tracks.size());
   findTrackstersInWindow(
-      tracksters, trackPColl, tracksterPropTiles, tsAllProp, del_tk_ts_layer1_, tracksters.size(), tsNearTk);
+      tracksters, trackPColl, trkDelataR1, tracksterPropTiles, tsAllProp, del_tk_ts_layer1_, tracksters.size(), tsNearTk);
 
   // step 2: tracks -> all tracksters, at lastLayerEE
   std::vector<std::vector<unsigned>> tsNearTkAtInt(tracks.size());
   findTrackstersInWindow(
-      tracksters, tkPropIntColl, tsPropIntTiles, tsAllPropInt, del_tk_ts_int_, tracksters.size(), tsNearTkAtInt);
+			 tracksters, tkPropIntColl, trkDelataR2, tsPropIntTiles, tsAllPropInt, del_tk_ts_int_, tracksters.size(), tsNearTkAtInt);
 
   std::vector<unsigned int> chargedHadronsFromTk;
   std::vector<std::vector<unsigned int>> trackstersInTrackIndices;
@@ -316,7 +356,6 @@ void GeneralInterpretationAlgo::makeCandidates(const Inputs &input,
 
     std::vector<unsigned int> chargedCandidate;
     float total_raw_energy = 0.f;
-
     float track_time = 0.f;
     float track_timeErr = 0.f;
     float track_quality = 0.f;

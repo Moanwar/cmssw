@@ -8,6 +8,7 @@
 #include "RecoHGCal/TICL/interface/TICLInterpretationAlgoBase.h"
 #include "DataFormats/TrackReco/interface/Track.h"
 #include "DataFormats/GeometrySurface/interface/BoundDisk.h"
+#include "RecoHGCal/TICL/interface/DeltaREstimator.h"
 
 namespace ticl {
 
@@ -39,6 +40,7 @@ namespace ticl {
 
     void findTrackstersInWindow(const MultiVectorManager<Trackster> &tracksters,
                                 const std::vector<std::pair<Vector, unsigned>> &seedingCollection,
+				const std::vector<float> &Delta,
                                 const std::array<TICLLayerTile, 2> &tracksterTiles,
                                 const std::vector<Vector> &tracksterPropPoints,
                                 float delta,
@@ -61,6 +63,8 @@ namespace ticl {
     const float del_tk_ts_layer1_;
     const float del_tk_ts_int_;
     const float timing_quality_threshold_;
+
+    ticl::DeltaREstimator deltaREstimator;  
 
     const HGCalDDDConstants *hgcons_;
 
