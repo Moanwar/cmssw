@@ -23,6 +23,8 @@ from RecoHGCal.TICL.ticlCandidateProducer_cfi import ticlCandidateProducer as _t
 from RecoHGCal.TICL.mtdSoAProducer_cfi import mtdSoAProducer as _mtdSoAProducer
 
 from Configuration.ProcessModifiers.ticl_v5_cff import ticl_v5
+from Configuration.ProcessModifiers.ticlv5_GNN_cff import ticlv5gnn
+
 from Configuration.ProcessModifiers.ticl_superclustering_dnn_cff import ticl_superclustering_dnn
 from Configuration.ProcessModifiers.ticl_superclustering_mustache_pf_cff import ticl_superclustering_mustache_pf
 from Configuration.ProcessModifiers.ticl_superclustering_mustache_ticl_cff import ticl_superclustering_mustache_ticl
@@ -144,6 +146,19 @@ mtdSoA = _mtdSoAProducer.clone()
 
 pfTICL = _pfTICLProducer.clone()
 ticl_v5.toModify(pfTICL, ticlCandidateSrc = cms.InputTag('ticlCandidate'), isTICLv5 = cms.bool(True), useTimingAverage=True)
+
+ticlv5gnn.toModify(
+    ticlCandidate, interpretationDescPSet = cms.PSet(
+        algo_verbosity = cms.int32(0),
+        cutTk = cms.string('1.48 < abs(eta) < 3.0 && pt > 1. && quality("highPurity") && hitPattern().numberOfLostHits("MISSING_OUTER_HITS") < 5'),
+        onnxTrkLinkingModelFirstDisk = cms.FileInPath('RecoHGCal/TICL/data/ticlv5/onnx_models/GNN_Linking/gnn_model_firstdisk.onnx'),
+        onnxTrkLinkingModelInterfaceDisk = cms.FileInPath('RecoHGCal/TICL/data/ticlv5/onnx_models/GNN_Linking/gnn_model_interfacedisk.onnx'),
+        inputNames = cms.vstring('x', 'edge_index', 'edge_attr'),
+        output = cms.vstring('output'),
+        delta_tk_ts = cms.double(0.31622777),
+        type = cms.string('GNN')
+    )
+)
 
 ticlPFTask = cms.Task(pfTICL)
 

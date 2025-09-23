@@ -879,6 +879,39 @@ upgradeWFs['ticl_v5'].step2 = {'--procModifiers': 'ticl_v5'}
 upgradeWFs['ticl_v5'].step3 = {'--procModifiers': 'ticl_v5'}
 upgradeWFs['ticl_v5'].step4 = {'--procModifiers': 'ticl_v5'}
 
+class UpgradeWorkflow_ticlv5_GNN(UpgradeWorkflow):
+    def setup_(self, step, stepName, stepDict, k, properties):
+        if ('Digi' in step and 'NoHLT' not in step) or ('HLTOnly' in step):
+            stepDict[stepName][k] = merge([self.step2, stepDict[step][k]])
+        if 'RecoGlobal' in step:
+            stepDict[stepName][k] = merge([self.step3, stepDict[step][k]])
+        if 'HARVESTGlobal' in step:
+            stepDict[stepName][k] = merge([self.step4, stepDict[step][k]])
+    def condition(self, fragment, stepList, key, hasHarvest):
+        selected_fragments = ["TTbar_14TeV", "CloseByP", "Eta1p7_2p7", "ZEE_14"]
+        return any(sf in fragment for sf in selected_fragments) and 'Run4' in key
+    
+upgradeWFs['ticlv5_GNN'] = UpgradeWorkflow_ticlv5_GNN(
+    steps = [
+        'HLTOnly',
+        'DigiTrigger',
+        'RecoGlobal',
+        'HARVESTGlobal'
+    ],
+    PU = [
+        'HLTOnly',
+        'DigiTrigger',
+        'RecoGlobal',
+        'HARVESTGlobal'
+    ],
+    suffix = '_ticlv5_GNN',
+    offset = 0.2031,
+)
+upgradeWFs['ticlv5_GNN'].step2 = {'--procModifiers': 'ticlv5_GNN'}
+upgradeWFs['ticlv5_GNN'].step3 = {'--procModifiers': 'ticlv5_GNN'}
+upgradeWFs['ticlv5_GNN'].step4 = {'--procModifiers': 'ticlv5_GNN'}
+
+
 class UpgradeWorkflow_ticl_v5_superclustering(UpgradeWorkflow):
     def setup_(self, step, stepName, stepDict, k, properties):
         if ('Digi' in step and 'NoHLT' not in step) or ('HLTOnly' in step):
