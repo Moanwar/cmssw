@@ -34,7 +34,7 @@ namespace ticl {
   // Method to process input data and prepare it for inference
   void TracksterInferenceByDNN::inputData(const std::vector<reco::CaloCluster>& layerClusters,
                                           std::vector<Trackster>& tracksters,
-					  const hgcal::RecHitTools &rhtools) {
+                                          const hgcal::RecHitTools& rhtools) {
     tracksterIndices_.clear();  // Clear previous indices
     for (int i = 0; i < static_cast<int>(tracksters.size()); i++) {
       float sumClusterEnergy = 0.;

@@ -33,7 +33,7 @@ namespace ticl {
   // Method to process input data and prepare it for inference
   void TracksterInferenceByPFN::inputData(const std::vector<reco::CaloCluster>& layerClusters,
                                           std::vector<Trackster>& tracksters,
-					  const hgcal::RecHitTools &rhtools) {
+                                          const hgcal::RecHitTools& rhtools) {
     tracksterIndices_.clear();  // Clear previous indices
     for (int i = 0; i < static_cast<int>(tracksters.size()); i++) {
       float sumClusterEnergy = 0.;
@@ -43,8 +43,8 @@ namespace ticl {
         sumClusterEnergy += static_cast<float>(layerClusters[vertex].energy());
         if (sumClusterEnergy >= eidMinClusterEnergy_) {
           tracksters[i].setRegressedEnergy(tracksters[i].raw_energy());  // Set regressed energy to raw energy
-          tracksters[i].zeroProbabilities();      // Zero out probabilities
-          tracksterIndices_.push_back(i);         // Add index to the list
+          tracksters[i].zeroProbabilities();                             // Zero out probabilities
+          tracksterIndices_.push_back(i);                                // Add index to the list
           break;
         }
       }

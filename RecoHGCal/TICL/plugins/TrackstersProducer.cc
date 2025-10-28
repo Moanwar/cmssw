@@ -51,6 +51,7 @@ public:
     const auto& geom = es.getData(geometry_token_);
     rhtools_.setGeometry(geom);
   }
+
 private:
   std::string detector_;
   bool doNose_;
@@ -68,7 +69,6 @@ private:
   const edm::ESGetToken<CaloGeometry, CaloGeometryRecord> geometry_token_;
   hgcal::RecHitTools rhtools_;
   const std::string itername_;
-
 };
 DEFINE_FWK_MODULE(TrackstersProducer);
 
