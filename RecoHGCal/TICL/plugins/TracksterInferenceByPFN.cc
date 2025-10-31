@@ -29,25 +29,19 @@ namespace ticl {
     onnxPIDSession_ = onnxPIDRuntimeInstance_.get();
     onnxEnergySession_ = onnxEnergyRuntimeInstance_.get();
   }
-
   // Method to process input data and prepare it for inference
   void TracksterInferenceByPFN::inputData(const std::vector<reco::CaloCluster>& layerClusters,
                                           std::vector<Trackster>& tracksters,
                                           const hgcal::RecHitTools& rhtools) {
     tracksterIndices_.clear();  // Clear previous indices
     for (int i = 0; i < static_cast<int>(tracksters.size()); i++) {
-      float sumClusterEnergy = 0.;
       for (const unsigned int& vertex : tracksters[i].vertices()) {
         if (rhtools.isBarrel(layerClusters[vertex].seed()))
           continue;
-        sumClusterEnergy += static_cast<float>(layerClusters[vertex].energy());
-        if (sumClusterEnergy >= eidMinClusterEnergy_) {
-          tracksters[i].setRegressedEnergy(tracksters[i].raw_energy());  // Set regressed energy to raw energy
-          tracksters[i].zeroProbabilities();                             // Zero out probabilities
-          tracksterIndices_.push_back(i);                                // Add index to the list
-          break;
-        }
       }
+      tracksters[i].setRegressedEnergy(0.f);  // Initialize regressed energy to 0
+      tracksters[i].zeroProbabilities();      // Zero out probabilities
+      tracksterIndices_.push_back(i);         // Only tracksters above threshold go to inference
     }
 
     // Prepare input shapes and data for inference
@@ -118,8 +112,13 @@ namespace ticl {
       auto& energyOutputTensor = result[0];
       if (!output_en_.empty()) {
         for (int i = 0; i < static_cast<int>(batchSize_); i++) {
+          auto& ts = tracksters[tracksterIndices_[i]];
           const float energy = energyOutputTensor[i];
-          tracksters[tracksterIndices_[i]].setRegressedEnergy(energy);  // Update energy
+          if (ts.raw_energy() > eidMinClusterEnergy_) {
+            ts.setRegressedEnergy(energy);  // Use regression if raw energy > eidMinClusterEnergy_
+          } else {
+            ts.setRegressedEnergy(ts.raw_energy());  // Otherwise, keep raw energy
+          }
         }
       }
     }

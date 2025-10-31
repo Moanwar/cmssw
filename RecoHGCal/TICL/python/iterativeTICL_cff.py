@@ -93,7 +93,7 @@ ticlTracksterLinks = _tracksterLinksProducer.clone(
         inputNames  = cms.vstring('input'),
         output_en   = cms.vstring('enreg_output'),
 	output_id   = cms.vstring('pid_output'),
-        eid_min_cluster_energy = cms.double(10),
+        eid_min_cluster_energy = cms.double(1),
         eid_n_clusters = cms.int32(10),
         eid_n_layers = cms.int32(50),
         onnxEnergyModelPath = cms.FileInPath('RecoHGCal/TICL/data/ticlv5/onnx_models/DNN/linking/energy_v0.onnx'),
@@ -122,7 +122,7 @@ ticlCandidate = _ticlCandidateProducer.clone(
     pluginInferenceAlgoTracksterInferenceByPFN=cms.PSet(
         algo_verbosity=cms.int32(0),
         onnxPIDModelPath=cms.FileInPath(
-            'RecoHGCal/TICL/data/ticlv5/onnx_models/PFN/linking/id_v1.onnx'),
+            'RecoHGCal/TICL/data/ticlv5/onnx_models/PFN/linking/id_v0.onnx'),
         onnxEnergyModelPath=cms.FileInPath(
             'RecoHGCal/TICL/data/ticlv5/onnx_models/PFN/linking/energy_v1.onnx'),
         inputNames=cms.vstring(
