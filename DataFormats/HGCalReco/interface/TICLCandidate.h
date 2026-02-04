@@ -109,10 +109,10 @@ public:
 
   inline const std::vector<edm::Ptr<ticl::Trackster>> tracksters() const { return tracksters_; };
 
-  inline const std::vector<unsigned int>& linkedTracksters() const { return linkedTracksters_; }
+  //inline const std::vector<unsigned int>& linkedTracksters() const { return linkedTracksters_; }
 
 
-  void setLinkedTracksters(const std::vector<unsigned int>& indices) { linkedTracksters_ = indices; }
+  //void setLinkedTracksters(const std::vector<unsigned int>& indices) { linkedTracksters_ = indices; }
 
   void setTracksters(const std::vector<edm::Ptr<ticl::Trackster>>& tracksters) { tracksters_ = tracksters; }
   void addTrackster(const edm::Ptr<ticl::Trackster>& trackster) {
@@ -142,7 +142,7 @@ private:
   // and there can be derived classes
   std::vector<edm::Ptr<ticl::Trackster>> tracksters_;
   std::vector<edm::Ptr<reco::Track>> trackPtrs_;
-  std::vector<unsigned int> linkedTracksters_;
+  //std::vector<unsigned int> linkedTracksters_;
   // Since it contains multiple tracksters, duplicate the probability interface
   std::array<float, 8> idProbabilities_;
 

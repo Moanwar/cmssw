@@ -590,6 +590,9 @@ private:
   std::vector<TTree*> tracksters_trees;  ///< TTree for each trackster collection to dump
 
   const edm::EDGetTokenT<std::vector<ticl::Trackster>> tracksters_in_candidate_token_;
+
+  const edm::EDGetTokenT<std::vector<std::vector<unsigned int>>> linkedTrackstersToken_;
+
   const edm::EDGetTokenT<std::vector<reco::CaloCluster>> layer_clusters_token_;
   const edm::EDGetTokenT<std::vector<TICLCandidate>> ticl_candidates_token_;
   const edm::EDGetTokenT<std::vector<ticl::Trackster>>
@@ -924,6 +927,7 @@ TICLDumper::TICLDumper(const edm::ParameterSet& ps)
       tracksters_token_(),
       tracksters_in_candidate_token_(
           consumes<std::vector<ticl::Trackster>>(ps.getParameter<edm::InputTag>("trackstersInCand"))),
+      linkedTrackstersToken_(consumes<std::vector<std::vector<unsigned int>>>(ps.getParameter<edm::InputTag>("linkedTracksters"))),
       layer_clusters_token_(consumes<std::vector<reco::CaloCluster>>(ps.getParameter<edm::InputTag>("layerClusters"))),
       ticl_candidates_token_(consumes<std::vector<TICLCandidate>>(ps.getParameter<edm::InputTag>("ticlcandidates"))),
       ticl_candidates_tracksters_token_(
@@ -1182,6 +1186,9 @@ void TICLDumper::analyze(const edm::Event& event, const edm::EventSetup& setup) 
 
   edm::Handle<std::vector<ticl::Trackster>> tracksters_in_candidate_handle;
   event.getByToken(tracksters_in_candidate_token_, tracksters_in_candidate_handle);
+
+  edm::Handle<std::vector<std::vector<unsigned int>>> linkedTracksters_h;
+  event.getByToken(linkedTrackstersToken_, linkedTracksters_h);
 
   //get all the layer clusters
   edm::Handle<std::vector<reco::CaloCluster>> layer_clusters_h;
@@ -1470,10 +1477,10 @@ void TICLDumper::analyze(const edm::Event& event, const edm::EventSetup& setup) 
   }
 
   tracksters_in_candidate.resize(ticlcandidates.size());
-  trackstersLinks_in_candidate.resize(ticlcandidates.size());
   track_in_candidate.resize(ticlcandidates.size(), -1);
   nCandidates = ticlcandidates.size();
   for (int i = 0; i < static_cast<int>(ticlcandidates.size()); ++i) {
+    trackstersLinks_in_candidate.push_back((*linkedTracksters_h)[i]);
     const auto& candidate = ticlcandidates[i];
     candidate_charge.push_back(candidate.charge());
     candidate_pdgId.push_back(candidate.pdgId());
@@ -1486,7 +1493,6 @@ void TICLDumper::analyze(const edm::Event& event, const edm::EventSetup& setup) 
     candidate_phi.push_back(candidate.phi());
     candidate_eta.push_back(candidate.eta());
     candidate_time.push_back(candidate.time());
-trackstersLinks_in_candidate.push_back(candidate.linkedTracksters());
     candidate_time_err.push_back(candidate.timeError());
     std::vector<float> id_probs;
     for (int j = 0; j < 8; j++) {
@@ -1600,6 +1606,8 @@ void TICLDumper::fillDescriptions(edm::ConfigurationDescriptions& descriptions) 
 
   desc.add<edm::InputTag>("trackstersInCand", edm::InputTag("ticlTrackstersCLUE3DHigh"));
 
+  desc.add<edm::InputTag>("linkedTracksters", edm::InputTag("ticlTrackstersCLUE3DHigh"));
+  
   desc.add<edm::InputTag>("layerClusters", edm::InputTag("hgcalMergeLayerClusters"));
   desc.add<edm::InputTag>("layer_clustersTime", edm::InputTag("hgcalMergeLayerClusters", "timeLayerCluster"));
   desc.add<edm::InputTag>("ticlcandidates", edm::InputTag("ticlTrackstersMerge"));
