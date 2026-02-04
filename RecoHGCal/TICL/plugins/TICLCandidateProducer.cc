@@ -322,7 +322,7 @@ void TICLCandidateProducer::produce(edm::Event &evt, const edm::EventSetup &es) 
   //egammaInterpretationAlg_->makecandidates(inputGSF, inputTiming, *resultTrackstersMerged, trackstersInGSFTrackIndices)
   // mask generalTracks associated to GSFTrack linked in egammaInterpretationAlgo_
 
-  generalInterpretationAlgo_->makeCandidates(input, inputTiming_h, *resultTracksters, trackstersInTrackIndices);
+  generalInterpretationAlgo_->makeCandidates(input, inputTiming_h, *resultTracksters, trackstersInTrackIndices, *linkedResultTracksters);
 
   assignPCAtoTracksters(*resultTracksters,
                         layerClusters,
@@ -347,6 +347,7 @@ void TICLCandidateProducer::produce(edm::Event &evt, const edm::EventSetup &es) 
       if (tracksterId != -1 and !maskTracksters.empty()) {
         auto tracksterPtr = edm::Ptr<Trackster>(resultTracksters_h, tracksterId);
         TICLCandidate chargedCandidate(trackPtr, tracksterPtr);
+	chargedCandidate.setLinkedTracksters((*linkedResultTracksters)[tracksterId]);
         resultCandidates->push_back(chargedCandidate);
         maskTracksters[tracksterId] = false;
       } else {
@@ -371,6 +372,7 @@ void TICLCandidateProducer::produce(edm::Event &evt, const edm::EventSetup &es) 
       edm::Ptr<Trackster> tracksterPtr(resultTracksters_h, iTrackster);
       edm::Ptr<reco::Track> trackPtr;
       TICLCandidate neutralCandidate(trackPtr, tracksterPtr);
+      neutralCandidate.setLinkedTracksters((*linkedResultTracksters)[iTrackster]);
       resultCandidates->push_back(neutralCandidate);
     }
   }

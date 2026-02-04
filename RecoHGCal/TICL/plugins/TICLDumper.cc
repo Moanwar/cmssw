@@ -716,6 +716,7 @@ private:
   std::vector<float> candidate_time_err;
   std::vector<std::vector<float>> candidate_id_probabilities;
   std::vector<std::vector<uint32_t>> tracksters_in_candidate;
+  std::vector<std::vector<unsigned int>> trackstersLinks_in_candidate;
   std::vector<int> track_in_candidate;
 
   // Layer clusters
@@ -847,6 +848,7 @@ void TICLDumper::clearVariables() {
   candidate_time_err.clear();
   candidate_id_probabilities.clear();
   tracksters_in_candidate.clear();
+  trackstersLinks_in_candidate.clear();
   track_in_candidate.clear();
 
   for (auto& helper : associations_dumperHelpers_) {
@@ -1091,6 +1093,7 @@ void TICLDumper::beginJob() {
     candidate_tree_->Branch("candidate_eta", &candidate_eta);
     candidate_tree_->Branch("track_in_candidate", &track_in_candidate);
     candidate_tree_->Branch("tracksters_in_candidate", &tracksters_in_candidate);
+    candidate_tree_->Branch("trackstersLinks_in_candidate", &trackstersLinks_in_candidate);
   }
   if (saveSuperclustering_ || saveRecoSuperclusters_) {
     superclustering_tree_ = fs->make<TTree>("superclustering", "Superclustering in HGCAL CE-E");
@@ -1467,6 +1470,7 @@ void TICLDumper::analyze(const edm::Event& event, const edm::EventSetup& setup) 
   }
 
   tracksters_in_candidate.resize(ticlcandidates.size());
+  trackstersLinks_in_candidate.resize(ticlcandidates.size());
   track_in_candidate.resize(ticlcandidates.size(), -1);
   nCandidates = ticlcandidates.size();
   for (int i = 0; i < static_cast<int>(ticlcandidates.size()); ++i) {
@@ -1482,6 +1486,7 @@ void TICLDumper::analyze(const edm::Event& event, const edm::EventSetup& setup) 
     candidate_phi.push_back(candidate.phi());
     candidate_eta.push_back(candidate.eta());
     candidate_time.push_back(candidate.time());
+trackstersLinks_in_candidate.push_back(candidate.linkedTracksters());
     candidate_time_err.push_back(candidate.timeError());
     std::vector<float> id_probs;
     for (int j = 0; j < 8; j++) {

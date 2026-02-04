@@ -18,9 +18,11 @@ namespace ticl {
     ~GeneralInterpretationAlgo() override;
 
     void makeCandidates(const Inputs &input,
-                        edm::Handle<MtdHostCollection> inputTiming_h,
-                        std::vector<Trackster> &resultTracksters,
-                        std::vector<int> &resultCandidate) override;
+			edm::Handle<MtdHostCollection> inputTiming_h,
+			std::vector<Trackster> &resultTracksters,
+			std::vector<int> &resultCandidate,
+			std::vector<std::vector<unsigned int>> &linkedResultTracksters) override;
+
 
     void initialize(const HGCalDDDConstants *hgcons,
                     const hgcal::RecHitTools rhtools,
