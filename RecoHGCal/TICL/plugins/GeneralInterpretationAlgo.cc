@@ -205,7 +205,7 @@ bool GeneralInterpretationAlgo::timeAndEnergyCompatible(float &total_raw_energy,
 void GeneralInterpretationAlgo::makeCandidates(const Inputs &input,
                                                edm::Handle<MtdHostCollection> inputTiming_h,
                                                std::vector<Trackster> &resultTracksters,
-                                               std::vector<int> &resultCandidate,
+					       std::vector<int> &resultCandidate,
 					       std::vector<std::vector<unsigned int>> &linkedResultTracksters) {
   bool useMTDTiming = inputTiming_h.isValid();
   const auto tkH = input.tracksHandle;
@@ -366,9 +366,10 @@ void GeneralInterpretationAlgo::makeCandidates(const Inputs &input,
     trackstersInTrackIndices[i] = chargedCandidate;
   }
 
+  linkedResultTracksters.reserve(input.tracksters.size());
+
   for (size_t iTrack = 0; iTrack < trackstersInTrackIndices.size(); iTrack++) {
     if (!trackstersInTrackIndices[iTrack].empty()) {
-      std::vector<unsigned int> linkedTracksters = trackstersInTrackIndices[iTrack];
       if (trackstersInTrackIndices[iTrack].size() == 1) {
         auto tracksterId = trackstersInTrackIndices[iTrack][0];
         resultCandidate[iTrack] = resultTracksters.size();
@@ -392,14 +393,14 @@ void GeneralInterpretationAlgo::makeCandidates(const Inputs &input,
         else
           resultTracksters.back().setIdProbability(ticl::Trackster::ParticleType::electron, 1.f);
       }
-      linkedResultTracksters.push_back(std::move(linkedTracksters));
+      linkedResultTracksters.push_back(trackstersInTrackIndices[iTrack]);
     }
   }
 
-  for (size_t iTrackster = 0; iTrackster < input.tracksters.size(); iTrackster++) {
+  for (auto iTrackster = 0u; iTrackster < input.tracksters.size(); iTrackster++) {
     if (chargedMask[iTrackster]) {
       resultTracksters.push_back(input.tracksters[iTrackster]);
-      linkedResultTracksters.push_back({static_cast<unsigned int>(iTrackster)});
+      linkedResultTracksters.push_back({iTrackster});
     }
   }
 };

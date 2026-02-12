@@ -23,7 +23,6 @@ namespace ticl {
 			std::vector<int> &resultCandidate,
 			std::vector<std::vector<unsigned int>> &linkedResultTracksters) override;
 
-
     void initialize(const HGCalDDDConstants *hgcons,
                     const hgcal::RecHitTools rhtools,
                     const edm::ESHandle<MagneticField> bfieldH,

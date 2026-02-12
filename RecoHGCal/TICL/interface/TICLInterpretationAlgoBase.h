@@ -83,7 +83,7 @@ namespace ticl {
     virtual void makeCandidates(const Inputs& input,
                                 edm::Handle<MtdHostCollection> inputTiming_h,
                                 std::vector<Trackster>& resultTracksters,
-                                std::vector<int>& resultCandidate,
+				std::vector<int>& resultCandidate,
 				std::vector<std::vector<unsigned int>> &linkedResultTracksters) = 0;
 
     virtual void initialize(const HGCalDDDConstants* hgcons,

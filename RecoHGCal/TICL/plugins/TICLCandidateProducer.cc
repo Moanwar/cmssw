@@ -183,8 +183,8 @@ TICLCandidateProducer::TICLCandidateProducer(const edm::ParameterSet &ps, const 
       TracksterInferenceAlgoFactory::get()->create(inferencePlugin, inferencePSet));
 
   produces<std::vector<TICLCandidate>>();
-  produces<std::vector<std::vector<unsigned int>>>("linkedTracksters"); 
-
+  produces<std::vector<std::vector<unsigned int>>>("linkedTracksters");
+  
   // New trackster collection after linking
   produces<std::vector<Trackster>>();
 
@@ -341,7 +341,7 @@ void TICLCandidateProducer::produce(edm::Event &evt, const edm::EventSetup &es) 
   std::vector<bool> maskTracksters(resultTracksters->size(), true);
   edm::OrphanHandle<std::vector<Trackster>> resultTracksters_h = evt.put(std::move(resultTracksters));
   auto linkedTracksters = std::make_unique<std::vector<std::vector<unsigned int>>>();
-
+  
   //create ChargedCandidates
   for (size_t iTrack = 0; iTrack < tracks.size(); iTrack++) {
     if (maskTracks[iTrack]) {
@@ -351,7 +351,6 @@ void TICLCandidateProducer::produce(edm::Event &evt, const edm::EventSetup &es) 
         auto tracksterPtr = edm::Ptr<Trackster>(resultTracksters_h, tracksterId);
         TICLCandidate chargedCandidate(trackPtr, tracksterPtr);
 	linkedTracksters->push_back((*linkedResultTracksters)[tracksterId]);
-	//chargedCandidate.setLinkedTracksters((*linkedResultTracksters)[tracksterId]);
         resultCandidates->push_back(chargedCandidate);
         maskTracksters[tracksterId] = false;
       } else {
@@ -377,7 +376,6 @@ void TICLCandidateProducer::produce(edm::Event &evt, const edm::EventSetup &es) 
       edm::Ptr<reco::Track> trackPtr;
       TICLCandidate neutralCandidate(trackPtr, tracksterPtr);
       linkedTracksters->push_back((*linkedResultTracksters)[iTrackster]);
-      //neutralCandidate.setLinkedTracksters((*linkedResultTracksters)[iTrackster]);
       resultCandidates->push_back(neutralCandidate);
     }
   }
@@ -429,7 +427,6 @@ void TICLCandidateProducer::produce(edm::Event &evt, const edm::EventSetup &es) 
 
   evt.put(std::move(resultCandidates));
   evt.put(std::move(linkedTracksters), "linkedTracksters");
-
 }
 
 template <typename F>
