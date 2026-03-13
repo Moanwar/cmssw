@@ -38,7 +38,8 @@ namespace edm {
       std::vector<std::string> const& gpuModels() const final;
 
       bool hasGpuNvidia() const final;
-
+      bool hasGpuAMD() const final;
+      
       std::string const& nvidiaDriverVersion() const final;
       int cudaDriverVersion() const final;
       int cudaRuntimeVersion() const final;
@@ -54,7 +55,9 @@ namespace edm {
       void setNvidiaDriverVersion(std::string const&) final;
       void setCudaDriverVersion(int) final;
       void setCudaRuntimeVersion(int) final;
-
+      void setRocmDriverVersion(int) final; 
+      void setRocmRuntimeVersion(int) final;
+      
       void setCpuModelsFormatted(std::string const&) final;
       void setCpuAverageSpeed(double) final;
 
@@ -71,10 +74,14 @@ namespace edm {
       int cudaDriverVersion_ = 0;
       int cudaRuntimeVersion_ = 0;
 
+      int rocmDriverVersion_ = 0;
+      int rocmRuntimeVersion_ = 0;
+      
       std::string cpuModelsFormatted_;
       double cpuAverageSpeed_ = 0;
 
       bool hasGpuNvidia_ = false;
+      bool hasGpuAMD_ = false;
       bool locked_ = false;
       bool verbose_;
     };
@@ -114,7 +121,8 @@ namespace edm {
     std::vector<std::string> const& ResourceInformationService::gpuModels() const { return gpuModels_; }
 
     bool ResourceInformationService::hasGpuNvidia() const { return hasGpuNvidia_; }
-
+    bool ResourceInformationService::hasGpuAMD() const { return hasGpuAMD_; }
+    
     std::string const& ResourceInformationService::nvidiaDriverVersion() const { return nvidiaDriverVersion_; }
 
     int ResourceInformationService::cudaDriverVersion() const { return cudaDriverVersion_; }
@@ -170,6 +178,18 @@ namespace edm {
       cpuAverageSpeed_ = val;
     }
 
+    void ResourceInformationService::setRocmDriverVersion(int val) {
+      throwIfLocked();
+      rocmDriverVersion_ = val;
+      hasGpuAMD_ = true;
+    }
+    
+    void ResourceInformationService::setRocmRuntimeVersion(int val) {
+      throwIfLocked();
+      rocmRuntimeVersion_ = val;
+      hasGpuAMD_ = true;
+    }
+    
     void ResourceInformationService::throwIfLocked() const {
       if (locked_) {
         // Only Services should modify ResourceInformationService. Service construction is run serially.

@@ -243,6 +243,9 @@ std::unique_ptr<ONNXRuntime> MLPFProducer::initializeGlobalCache(const edm::Para
   if (ri.isAvailable() && ri->hasGpuNvidia()) {
     backend = Backend::cuda;
     edm::LogInfo("MLPFProducer") << "NVIDIA GPU detected Running ONNX model on CUDA.";
+  } else if (ri.isAvailable() && ri->hasGpuAMD()) {
+    backend = Backend::rocm;
+    edm::LogInfo("MLPFProducer") << "AMD GPU detected Running ONNX model on ROCm.";
   } else {
     edm::LogInfo("MLPFProducer") << "No NVIDIA GPU detected Running ONNX model on CPU.";
   }

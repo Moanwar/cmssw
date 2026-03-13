@@ -286,6 +286,8 @@ ROCmService::ROCmService(edm::ParameterSet const& config) : verbose_(config.getU
   if (resourceInformationService.isAvailable()) {
     std::vector<std::string> modelsV(models.begin(), models.end());
     resourceInformationService->setGPUModels(modelsV);
+    resourceInformationService->setRocmDriverVersion(driverVersion);
+    resourceInformationService->setRocmRuntimeVersion(runtimeVersion);
     /*
     std::string nvidiaDriverVersion{systemDriverVersion};
     resourceInformationService->setNvidiaDriverVersion(nvidiaDriverVersion);

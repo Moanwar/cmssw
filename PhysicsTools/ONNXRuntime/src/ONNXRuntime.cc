@@ -80,6 +80,9 @@ namespace cms::Ort {
       // https://www.onnxruntime.ai/docs/reference/execution-providers/CUDA-ExecutionProvider.html
       OrtCUDAProviderOptions options;
       sess_opts.AppendExecutionProvider_CUDA(options);
+    } else if (backend == Backend::rocm) {
+      OrtROCMProviderOptions options;
+      sess_opts.AppendExecutionProvider_ROCM(options);
     }
     return sess_opts;
   }

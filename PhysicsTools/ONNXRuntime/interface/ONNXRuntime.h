@@ -25,6 +25,7 @@ namespace cms::Ort {
   enum class Backend {
     cpu,
     cuda,
+    rocm,
   };
 
   class ONNXRuntime {
