@@ -34,6 +34,7 @@ namespace cms::Ort {
     ONNXRuntime& operator=(const ONNXRuntime&) = delete;
     ~ONNXRuntime();
 
+    static Backend selectBackend();
     static ::Ort::SessionOptions defaultSessionOptions(Backend backend = Backend::cpu);
 
     // Run inference and get outputs

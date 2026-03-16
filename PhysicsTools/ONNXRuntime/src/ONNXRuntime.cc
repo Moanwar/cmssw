@@ -9,6 +9,9 @@
 
 #include "FWCore/Utilities/interface/Exception.h"
 #include "FWCore/Utilities/interface/thread_safety_macros.h"
+#include "FWCore/ServiceRegistry/interface/Service.h"
+#include "FWCore/AbstractServices/interface/ResourceInformation.h"
+#include "FWCore/MessageLogger/interface/MessageLogger.h"
 #include <algorithm>
 #include <cassert>
 #include <functional>
@@ -72,6 +75,17 @@ namespace cms::Ort {
   }
 
   ONNXRuntime::~ONNXRuntime() {}
+
+  Backend ONNXRuntime::selectBackend() {
+    edm::Service<edm::ResourceInformation> ri;
+    if (ri.isAvailable() && ri->hasGpuNvidia()) {
+      edm::LogInfo("ONNXRuntime") << "NVIDIA GPU detected. Using CUDA backend.";
+      return Backend::cuda;
+    } else {
+      edm::LogInfo("ONNXRuntime") << "No GPU detected. Using CPU backend.";
+      return Backend::cpu;
+    }
+  }
 
   SessionOptions ONNXRuntime::defaultSessionOptions(Backend backend) {
     SessionOptions sess_opts;
