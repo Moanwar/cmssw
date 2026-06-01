@@ -723,6 +723,7 @@ private:
   std::vector<float> simTICLCandidate_regressed_energy;
   std::vector<std::vector<int>> simTICLCandidate_simTracksterCPIndex;
   std::vector<std::vector<int>> simTICLCandidate_tracks_in_candidate;
+  std::vector<std::vector<int>> simTICLCandidate_gsftracks_in_candidate;
   std::vector<std::vector<float>> simTICLCandidate_boundaryX;
   std::vector<std::vector<float>> simTICLCandidate_boundaryY;
   std::vector<std::vector<float>> simTICLCandidate_boundaryZ;
@@ -819,6 +820,47 @@ private:
   std::vector<int> track_muon_type;
   std::vector<int> track_gsf_type;
 
+
+
+    // GSF Tracks (for MLPF model input)
+  std::vector<int> gsf_track_id;
+  std::vector<float> gsf_track_pt;
+  std::vector<float> gsf_track_ptMode;
+  std::vector<float> gsf_track_ptModeError;
+  std::vector<float> gsf_track_px;
+  std::vector<float> gsf_track_py;
+  std::vector<float> gsf_track_pz;
+  std::vector<float> gsf_track_pxMode;
+  std::vector<float> gsf_track_pyMode;
+  std::vector<float> gsf_track_pzMode;
+  std::vector<float> gsf_track_eta;
+  std::vector<float> gsf_track_etaMode;
+  std::vector<float> gsf_track_etaModeError;
+  std::vector<float> gsf_track_phi;
+  std::vector<float> gsf_track_phiMode;
+  std::vector<float> gsf_track_phiModeError;
+  std::vector<float> gsf_track_energy;
+  std::vector<float> gsf_track_pMode;
+  std::vector<float> gsf_track_charge;
+  std::vector<float> gsf_track_chargeMode;
+  std::vector<float> gsf_track_lambda;
+  std::vector<float> gsf_track_lambdaMode;
+  std::vector<float> gsf_track_lambdaModeError;
+  std::vector<float> gsf_track_theta;
+  std::vector<float> gsf_track_thetaMode;
+  std::vector<float> gsf_track_thetaModeError;
+  std::vector<float> gsf_track_vx;
+  std::vector<float> gsf_track_vy;
+  std::vector<float> gsf_track_vz;
+  std::vector<float> gsf_track_qoverpError;
+  std::vector<float> gsf_track_qoverpModeError;
+  std::vector<int> gsf_track_quality;
+  std::vector<int> gsf_track_missing_outer_hits;
+  std::vector<int> gsf_track_missing_inner_hits;
+  std::vector<int> gsf_track_nhits;
+  std::vector<float> gsf_track_num_brems;  // Number of bremsstrahlung photons
+  
+
   // rechits
   std::vector<uint32_t> rechit_ID;
   std::vector<float> rechit_energy;
@@ -848,6 +890,7 @@ private:
   TTree* rechits_tree_;
   TTree* simhits_tree_;
   TTree* genparticles_tree_;
+  TTree* gsf_tracks_tree_;
 
 };
 
@@ -898,6 +941,7 @@ void TICLDumper::clearVariables() {
   simTICLCandidate_pdgId.clear();
   simTICLCandidate_charge.clear();
   simTICLCandidate_tracks_in_candidate.clear();
+  simTICLCandidate_gsftracks_in_candidate.clear();
   simTICLCandidate_ispu.clear();
   
   nCandidates = 0;
@@ -979,6 +1023,46 @@ void TICLDumper::clearVariables() {
   track_muon_csc_hits.clear();
   track_muon_type.clear();
   track_gsf_type.clear();
+
+
+    // GSF tracks
+  gsf_track_id.clear();
+  gsf_track_pt.clear();
+  gsf_track_ptMode.clear();
+  gsf_track_ptModeError.clear();
+  gsf_track_px.clear();
+  gsf_track_py.clear();
+  gsf_track_pz.clear();
+  gsf_track_pxMode.clear();
+  gsf_track_pyMode.clear();
+  gsf_track_pzMode.clear();
+  gsf_track_eta.clear();
+  gsf_track_etaMode.clear();
+  gsf_track_etaModeError.clear();
+  gsf_track_phi.clear();
+  gsf_track_phiMode.clear();
+  gsf_track_phiModeError.clear();
+  gsf_track_energy.clear();
+  gsf_track_pMode.clear();
+  gsf_track_charge.clear();
+  gsf_track_chargeMode.clear();
+  gsf_track_lambda.clear();
+  gsf_track_lambdaMode.clear();
+  gsf_track_lambdaModeError.clear();
+  gsf_track_theta.clear();
+  gsf_track_thetaMode.clear();
+  gsf_track_thetaModeError.clear();
+  gsf_track_vx.clear();
+  gsf_track_vy.clear();
+  gsf_track_vz.clear();
+  gsf_track_qoverpError.clear();
+  gsf_track_qoverpModeError.clear();
+  gsf_track_quality.clear();
+  gsf_track_missing_outer_hits.clear();
+  gsf_track_missing_inner_hits.clear();
+  gsf_track_nhits.clear();
+  gsf_track_num_brems.clear();
+
   
   rechit_ID.clear();
   rechit_energy.clear();
@@ -1265,6 +1349,50 @@ void TICLDumper::beginJob() {
     tracks_tree_->Branch("track_muon_csc_hits", &track_muon_csc_hits);
     tracks_tree_->Branch("track_muon_type", &track_muon_type);
     tracks_tree_->Branch("track_gsf_type", &track_gsf_type);
+
+    gsf_tracks_tree_ = fs->make<TTree>("gsftracks", "GSF Tracks (for MLPF)");
+    gsf_tracks_tree_->Branch("event", &eventId_);
+    gsf_tracks_tree_->Branch("gsf_track_id", &gsf_track_id);
+    
+    // Regular track parameters
+    gsf_tracks_tree_->Branch("gsf_track_pt", &gsf_track_pt);
+    gsf_tracks_tree_->Branch("gsf_track_px", &gsf_track_px);
+    gsf_tracks_tree_->Branch("gsf_track_py", &gsf_track_py);
+    gsf_tracks_tree_->Branch("gsf_track_pz", &gsf_track_pz);
+    gsf_tracks_tree_->Branch("gsf_track_eta", &gsf_track_eta);
+    gsf_tracks_tree_->Branch("gsf_track_phi", &gsf_track_phi);
+    gsf_tracks_tree_->Branch("gsf_track_energy", &gsf_track_energy);
+    gsf_tracks_tree_->Branch("gsf_track_charge", &gsf_track_charge);
+    gsf_tracks_tree_->Branch("gsf_track_lambda", &gsf_track_lambda);
+    gsf_tracks_tree_->Branch("gsf_track_theta", &gsf_track_theta);
+    gsf_tracks_tree_->Branch("gsf_track_vx", &gsf_track_vx);
+    gsf_tracks_tree_->Branch("gsf_track_vy", &gsf_track_vy);
+    gsf_tracks_tree_->Branch("gsf_track_vz", &gsf_track_vz);
+    gsf_tracks_tree_->Branch("gsf_track_qoverpError", &gsf_track_qoverpError);
+    gsf_tracks_tree_->Branch("gsf_track_quality", &gsf_track_quality);
+    gsf_tracks_tree_->Branch("gsf_track_missing_outer_hits", &gsf_track_missing_outer_hits);
+    gsf_tracks_tree_->Branch("gsf_track_missing_inner_hits", &gsf_track_missing_inner_hits);
+    gsf_tracks_tree_->Branch("gsf_track_nhits", &gsf_track_nhits);
+    
+    // MODE parameters (for MLPF model - THESE ARE KEY!)
+    gsf_tracks_tree_->Branch("gsf_track_ptMode", &gsf_track_ptMode);
+    gsf_tracks_tree_->Branch("gsf_track_ptModeError", &gsf_track_ptModeError);
+    gsf_tracks_tree_->Branch("gsf_track_pxMode", &gsf_track_pxMode);
+    gsf_tracks_tree_->Branch("gsf_track_pyMode", &gsf_track_pyMode);
+    gsf_tracks_tree_->Branch("gsf_track_pzMode", &gsf_track_pzMode);
+    gsf_tracks_tree_->Branch("gsf_track_pMode", &gsf_track_pMode);
+    gsf_tracks_tree_->Branch("gsf_track_etaMode", &gsf_track_etaMode);
+    gsf_tracks_tree_->Branch("gsf_track_etaModeError", &gsf_track_etaModeError);
+    gsf_tracks_tree_->Branch("gsf_track_phiMode", &gsf_track_phiMode);
+    gsf_tracks_tree_->Branch("gsf_track_phiModeError", &gsf_track_phiModeError);
+    gsf_tracks_tree_->Branch("gsf_track_chargeMode", &gsf_track_chargeMode);
+    gsf_tracks_tree_->Branch("gsf_track_lambdaMode", &gsf_track_lambdaMode);
+    gsf_tracks_tree_->Branch("gsf_track_lambdaModeError", &gsf_track_lambdaModeError);
+    gsf_tracks_tree_->Branch("gsf_track_thetaMode", &gsf_track_thetaMode);
+    gsf_tracks_tree_->Branch("gsf_track_thetaModeError", &gsf_track_thetaModeError);
+    gsf_tracks_tree_->Branch("gsf_track_qoverpModeError", &gsf_track_qoverpModeError);
+    gsf_tracks_tree_->Branch("gsf_track_num_brems", &gsf_track_num_brems);
+
   }
 
   if (saveSimTICLCandidate_) {
@@ -1287,6 +1415,7 @@ void TICLDumper::beginJob() {
     simTICLCandidate_tree->Branch("simTICLCandidate_pdgId", &simTICLCandidate_pdgId);
     simTICLCandidate_tree->Branch("simTICLCandidate_charge", &simTICLCandidate_charge);
     simTICLCandidate_tree->Branch("simTICLCandidate_tracks_in_candidate", &simTICLCandidate_tracks_in_candidate);
+    simTICLCandidate_tree->Branch("simTICLCandidate_gsftracks_in_candidate", &simTICLCandidate_gsftracks_in_candidate);
     simTICLCandidate_tree->Branch("simTICLCandidate_ispu", &simTICLCandidate_ispu);
   }
 }
@@ -1532,6 +1661,8 @@ void TICLDumper::analyze(const edm::Event& event, const edm::EventSetup& setup) 
   
   const auto& simTrackstersSC_h = event.getHandle(simTracksters_SC_token_);
   simTICLCandidate_tracks_in_candidate.resize(simTICLCandidates.size());
+  simTICLCandidate_gsftracks_in_candidate.resize(simTICLCandidates.size());
+
   for (size_t i = 0; i < simTICLCandidates.size(); ++i) {
     auto const& cand = simTICLCandidates[i];
     
@@ -1561,7 +1692,15 @@ void TICLDumper::analyze(const edm::Event& event, const edm::EventSetup& setup) 
     simTICLCandidate_simTracksterCPIndex.push_back(tmpIdxVec);
     tmpIdxVec.clear();
     auto const& trackPtrs = cand.trackPtrs();
-    if (!trackPtrs.empty()) {
+    auto const& gsfTrackPtrs = cand.gsfTrackPtrs();
+
+    if (!gsfTrackPtrs.empty()) {
+      for (const auto& gsftrackPtr : gsfTrackPtrs) {
+     	int gsf_idx = gsftrackPtr.get() - (edm::Ptr<reco::GsfTrack>(gsf_tracks_h, 0)).get();
+        simTICLCandidate_gsftracks_in_candidate[i].push_back(gsf_idx);
+      }
+    }
+      if (!trackPtrs.empty()) {
       std::vector<float> boundaryX;
       std::vector<float> boundaryY;
       std::vector<float> boundaryZ;
@@ -1687,16 +1826,77 @@ void TICLDumper::analyze(const edm::Event& event, const edm::EventSetup& setup) 
   if (!associations_dumperHelpers_.empty())
     associations_tree_->Fill();
 
-  for (size_t i = 0; i < gsf_tracks_h->size(); ++i) {
-    reco::GsfTrackRef gsfTrackRef(gsf_tracks_h, i);
-    auto result = egamma::getClosestCtfToGsf(gsfTrackRef, tracks_h, ctfTrackVariablesView);
-    if (result.first.isNonnull()) {
-      size_t trackIdx = result.first.key();
-      trackToGsfIdx[trackIdx] = i;
+  //for (size_t i = 0; i < gsf_tracks_h->size(); ++i) {
+  // reco::GsfTrackRef gsfTrackRef(gsf_tracks_h, i);
+  //auto result = egamma::getClosestCtfToGsf(gsfTrackRef, tracks_h, ctfTrackVariablesView);
+  //if (result.first.isNonnull()) {
+  //  size_t trackIdx = result.first.key();
+  //  trackToGsfIdx[trackIdx] = i;
+  //}
+  //}
+
+
+
+
+    // GSF Tracks (for MLPF model)
+  if (saveTracks_) {
+    for (size_t i = 0; i < gsf_tracks_h->size(); ++i) {
+      const auto& gsfTrack = (*gsf_tracks_h)[i];
+      reco::GsfTrackRef gsfTrackRef(gsf_tracks_h, i);
+      auto result = egamma::getClosestCtfToGsf(gsfTrackRef, tracks_h, ctfTrackVariablesView);
+      if (result.first.isNonnull()) {
+	size_t trackIdx = result.first.key();
+	trackToGsfIdx[trackIdx] = i;
+      }
+      
+      // Track ID
+      gsf_track_id.push_back(i);
+      
+      // Regular track parameters
+      gsf_track_pt.push_back(gsfTrack.pt());
+      gsf_track_px.push_back(gsfTrack.px());
+      gsf_track_py.push_back(gsfTrack.py());
+      gsf_track_pz.push_back(gsfTrack.pz());
+      gsf_track_eta.push_back(gsfTrack.eta());
+      gsf_track_phi.push_back(gsfTrack.phi());
+      gsf_track_energy.push_back(gsfTrack.p());  // Momentum magnitude
+      gsf_track_charge.push_back(gsfTrack.charge());
+      gsf_track_lambda.push_back(gsfTrack.lambda());
+      gsf_track_theta.push_back(gsfTrack.theta());
+      gsf_track_vx.push_back(gsfTrack.vx());
+      gsf_track_vy.push_back(gsfTrack.vy());
+      gsf_track_vz.push_back(gsfTrack.vz());
+      gsf_track_qoverpError.push_back(gsfTrack.qoverpError());
+      gsf_track_quality.push_back(gsfTrack.quality(reco::TrackBase::highPurity));
+      gsf_track_missing_outer_hits.push_back(gsfTrack.missingOuterHits());
+      gsf_track_missing_inner_hits.push_back(gsfTrack.missingInnerHits());
+      gsf_track_nhits.push_back(gsfTrack.recHitsSize());
+      
+      //MODE parameters (KEY FOR MLPF MODEL)
+      gsf_track_ptMode.push_back(gsfTrack.ptMode());
+      gsf_track_ptModeError.push_back(gsfTrack.ptModeError());
+      gsf_track_pxMode.push_back(gsfTrack.pxMode());
+      gsf_track_pyMode.push_back(gsfTrack.pyMode());
+      gsf_track_pzMode.push_back(gsfTrack.pzMode());
+      gsf_track_pMode.push_back(gsfTrack.pMode());
+      gsf_track_etaMode.push_back(gsfTrack.etaMode());
+      gsf_track_etaModeError.push_back(gsfTrack.etaModeError());
+      gsf_track_phiMode.push_back(gsfTrack.phiMode());
+      gsf_track_phiModeError.push_back(gsfTrack.phiModeError());
+      gsf_track_chargeMode.push_back(gsfTrack.chargeMode());
+      gsf_track_lambdaMode.push_back(gsfTrack.lambdaMode());
+      gsf_track_lambdaModeError.push_back(gsfTrack.lambdaModeError());
+      gsf_track_thetaMode.push_back(gsfTrack.thetaMode());
+      gsf_track_thetaModeError.push_back(gsfTrack.thetaModeError());
+      gsf_track_qoverpModeError.push_back(gsfTrack.qoverpModeError());
+      
+      // Number of bremsstrahlung photons
+      // This requires access to GsfPFRecTrack, which is optional
+      // For now, we'll set to -1 if not available
+      gsf_track_num_brems.push_back(-1.0);
     }
   }
-
-    
+  
   //Tracks
   for (size_t i = 0; i < tracks.size(); i++) {
     const auto& track = tracks[i];
