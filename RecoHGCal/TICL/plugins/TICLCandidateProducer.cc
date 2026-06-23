@@ -20,6 +20,9 @@
 #include "DataFormats/HGCalReco/interface/TICLLayerTile.h"
 #include "DataFormats/HGCalReco/interface/Trackster.h"
 #include "DataFormats/TrackReco/interface/Track.h"
+#include "DataFormats/GsfTrackReco/interface/GsfTrack.h"
+#include "RecoEgamma/EgammaElectronAlgos/interface/GsfElectronTools.h"
+
 #include "DataFormats/MuonReco/interface/Muon.h"
 #include "DataFormats/GeometrySurface/interface/BoundDisk.h"
 #include "DataFormats/HGCalReco/interface/TICLCandidate.h"
@@ -37,6 +40,7 @@
 
 #include "RecoHGCal/TICL/interface/GlobalCache.h"
 #include "CommonTools/Utils/interface/StringCutObjectSelector.h"
+
 
 #include "TrackingTools/TrajectoryState/interface/TrajectoryStateTransform.h"
 #include "TrackingTools/GeomPropagators/interface/Propagator.h"
@@ -96,6 +100,8 @@ private:
   const edm::EDGetTokenT<std::vector<reco::Track>> tracks_token_;
   edm::EDGetTokenT<MtdHostCollection> inputTimingToken_;
 
+  const edm::EDGetTokenT<reco::GsfTrackCollection> gsf_tracks_token_;
+  
   const edm::EDGetTokenT<std::vector<reco::Muon>> muons_token_;
   const bool useMTDTiming_;
   const bool useTimingAverage_;
@@ -127,6 +133,8 @@ TICLCandidateProducer::TICLCandidateProducer(const edm::ParameterSet &ps, const 
           consumes<edm::ValueMap<std::pair<float, float>>>(ps.getParameter<edm::InputTag>("layer_clustersTime"))),
       regressionAndPid_(ps.getParameter<bool>("regressionAndPid")),
       tracks_token_(consumes<std::vector<reco::Track>>(ps.getParameter<edm::InputTag>("tracks"))),
+      gsf_tracks_token_(consumes<reco::GsfTrackCollection>(ps.getParameter<edm::InputTag>("gsfTracks"))),
+
       muons_token_(consumes<std::vector<reco::Muon>>(ps.getParameter<edm::InputTag>("muons"))),
       useMTDTiming_(ps.getParameter<bool>("useMTDTiming")),
       useTimingAverage_(ps.getParameter<bool>("useTimingAverage")),
@@ -184,7 +192,8 @@ TICLCandidateProducer::TICLCandidateProducer(const edm::ParameterSet &ps, const 
       TracksterInferenceAlgoFactory::get()->create(inferencePlugin, inferencePSet));
 
   produces<std::vector<TICLCandidate>>();
-
+  produces<std::vector<std::vector<unsigned int>>>("linkedTracksters");
+  
   // New trackster collection after linking
   produces<std::vector<Trackster>>();
 
@@ -227,12 +236,13 @@ void filterTracks(edm::Handle<std::vector<reco::Track>> tkH,
     // veto tracks associated to muons
     int muId = PFMuonAlgo::muAssocToTrack(trackref, *muons_h);
     const reco::MuonRef muonref = reco::MuonRef(muons_h, muId);
-
-    if (!cutTk_((tk)) or (muId != -1 and PFMuonAlgo::isMuon(muonref) and not(*muons_h)[muId].isTrackerMuon())) {
+    
+    if (!cutTk_((tk)) or (muId != -1 and 
+			  (PFMuonAlgo::isMuon(muonref) or (*muons_h)[muId].isTrackerMuon()))) {
       maskTracks[i] = false;
       continue;
     }
-
+    
     // don't consider tracks below 2 GeV for linking
     if (std::sqrt(tk.p() * tk.p() + ticl::mpion2) < tkEnergyCut_) {
       maskTracks[i] = false;
@@ -257,7 +267,13 @@ void TICLCandidateProducer::produce(edm::Event &evt, const edm::EventSetup &es) 
   edm::Handle<std::vector<reco::Track>> tracks_h;
   evt.getByToken(tracks_token_, tracks_h);
   const auto &tracks = *tracks_h;
+  edm::soa::EtaPhiTable ctfTrackVariables(tracks);
+  edm::soa::EtaPhiTableView ctfTrackVariablesView = ctfTrackVariables;
 
+  edm::Handle<reco::GsfTrackCollection> gsf_tracks_h;
+  evt.getByToken(gsf_tracks_token_, gsf_tracks_h);
+  std::map<size_t, int> trackToGsfIdx;
+  
   edm::Handle<MtdHostCollection> inputTiming_h;
   MtdHostCollection::ConstView inputTimingView;
   if (useMTDTiming_) {
@@ -302,7 +318,7 @@ void TICLCandidateProducer::produce(edm::Event &evt, const edm::EventSetup &es) 
       }
     }
   }
-
+  
   std::vector<bool> maskTracks;
   maskTracks.resize(tracks.size());
   filterTracks(tracks_h, muons_h, cutTk_, tkEnergyCut_, maskTracks);
@@ -322,8 +338,9 @@ void TICLCandidateProducer::produce(edm::Event &evt, const edm::EventSetup &es) 
   //TODO
   //egammaInterpretationAlg_->makecandidates(inputGSF, inputTiming, *resultTrackstersMerged, trackstersInGSFTrackIndices)
   // mask generalTracks associated to GSFTrack linked in egammaInterpretationAlgo_
+  //generalInterpretationAlgo_->makeCandidates(input, inputTiming_h, *resultTracksters, trackstersInTrackIndices);
 
-  generalInterpretationAlgo_->makeCandidates(input, inputTiming_h, *resultTracksters, trackstersInTrackIndices);
+  generalInterpretationAlgo_->makeCandidates(input, inputTiming_h, *resultTracksters, trackstersInTrackIndices, *linkedResultTracksters);
 
   assignPCAtoTracksters(*resultTracksters,
                         layerClusters,
@@ -340,38 +357,59 @@ void TICLCandidateProducer::produce(edm::Event &evt, const edm::EventSetup &es) 
 
   std::vector<bool> maskTracksters(resultTracksters->size(), true);
   edm::OrphanHandle<std::vector<Trackster>> resultTracksters_h = evt.put(std::move(resultTracksters));
-  //create ChargedCandidates
-  for (size_t iTrack = 0; iTrack < tracks.size(); iTrack++) {
-    if (maskTracks[iTrack]) {
-      auto const tracksterId = trackstersInTrackIndices[iTrack];
-      auto trackPtr = edm::Ptr<reco::Track>(tracks_h, iTrack);
-      if (tracksterId != -1 and !maskTracksters.empty()) {
-        auto tracksterPtr = edm::Ptr<Trackster>(resultTracksters_h, tracksterId);
-        TICLCandidate chargedCandidate(trackPtr, tracksterPtr);
-        resultCandidates->push_back(chargedCandidate);
-        maskTracksters[tracksterId] = false;
-      } else {
-        //charged candidates track only
-        auto trackRef = edm::Ref<reco::TrackCollection>(tracks_h, iTrack);
-        const int muId = PFMuonAlgo::muAssocToTrack(trackRef, *muons_h);
-        const reco::MuonRef muonRef = reco::MuonRef(muons_h, muId);
-        if (muonRef.isNonnull() and muonRef->isGlobalMuon()) {
-          // create muon candidate
-          edm::Ptr<Trackster> tracksterPtr;
-          TICLCandidate chargedCandidate(trackPtr, tracksterPtr);
-          chargedCandidate.setPdgId(13 * trackPtr.get()->charge());
-          resultCandidates->push_back(chargedCandidate);
-        }
-      }
+  auto linkedTracksters = std::make_unique<std::vector<std::vector<unsigned int>>>();
+  
+
+  for (size_t i = 0; i < gsf_tracks_h->size(); ++i) {
+    reco::GsfTrackRef gsfTrackRef(gsf_tracks_h, i);
+    auto result = egamma::getClosestCtfToGsf(gsfTrackRef, tracks_h, ctfTrackVariablesView);
+    if (result.first.isNonnull()) {
+      size_t trackIdx = result.first.key();
+      trackToGsfIdx[trackIdx] = i;
     }
   }
 
+  
+  for (size_t iTrack = 0; iTrack < tracks.size(); iTrack++) {
+    auto trackPtr = edm::Ptr<reco::Track>(tracks_h, iTrack);
+    reco::TrackRef trackRef(tracks_h, iTrack);
+    auto gsf_it = trackToGsfIdx.find(iTrack);
+    bool hasGsfMatch = (gsf_it != trackToGsfIdx.end());
+    const int muId = PFMuonAlgo::muAssocToTrack(trackRef, *muons_h);
+    const reco::MuonRef muonRef = reco::MuonRef(muons_h, muId);
+    
+    // Muon candidates: handled separately, orthogonal to hadronic linking
+    // because filterTracks sets maskTracks=false for all muons,
+    // so they never enter makeCandidates and trackstersInTrackIndices stays -1
+    if (muonRef.isNonnull() and (muonRef->isGlobalMuon() or muonRef->isTrackerMuon())) {
+      edm::Ptr<Trackster> tracksterPtr;
+      TICLCandidate chargedCandidate(trackPtr, tracksterPtr);
+      chargedCandidate.setPdgId(13 * trackPtr.get()->charge());
+      resultCandidates->push_back(chargedCandidate);
+      linkedTracksters->emplace_back();
+      continue;  // skip hadronic linking block entirely
+    }
+    
+    // Hadronic candidates: only non-muon tracks with maskTracks=true
+    if (maskTracks[iTrack]) {
+      auto const tracksterId = trackstersInTrackIndices[iTrack];
+      if (tracksterId != -1 and !maskTracksters.empty()) {
+	  auto tracksterPtr = edm::Ptr<Trackster>(resultTracksters_h, tracksterId);
+	  TICLCandidate chargedCandidate(trackPtr, tracksterPtr);
+	  linkedTracksters->push_back((*linkedResultTracksters)[tracksterId]);
+	  resultCandidates->push_back(chargedCandidate);
+	  maskTracksters[tracksterId] = false;
+      }
+    }
+  }
+  
   //Neutral Candidate
   for (size_t iTrackster = 0; iTrackster < maskTracksters.size(); iTrackster++) {
     if (maskTracksters[iTrackster]) {
       edm::Ptr<Trackster> tracksterPtr(resultTracksters_h, iTrackster);
       edm::Ptr<reco::Track> trackPtr;
       TICLCandidate neutralCandidate(trackPtr, tracksterPtr);
+      linkedTracksters->push_back((*linkedResultTracksters)[iTrackster]);
       resultCandidates->push_back(neutralCandidate);
     }
   }
@@ -422,6 +460,7 @@ void TICLCandidateProducer::produce(edm::Event &evt, const edm::EventSetup &es) 
   assignTimeToCandidates(*resultCandidates, tracks_h, inputTimingView, getPathLength);
 
   evt.put(std::move(resultCandidates));
+  evt.put(std::move(linkedTracksters), "linkedTracksters");
 }
 
 template <typename F>
@@ -517,6 +556,7 @@ void TICLCandidateProducer::fillDescriptions(edm::ConfigurationDescriptions &des
   desc.add<edm::InputTag>("layer_clusters", edm::InputTag("hgcalMergeLayerClusters"));
   desc.add<edm::InputTag>("layer_clustersTime", edm::InputTag("hgcalMergeLayerClusters", "timeLayerCluster"));
   desc.add<edm::InputTag>("tracks", edm::InputTag("generalTracks"));
+  desc.add<edm::InputTag>("gsfTracks", edm::InputTag("electronGsfTracks"));
   desc.add<edm::InputTag>("timingSoA", edm::InputTag("mtdSoA"));
   desc.add<edm::InputTag>("muons", edm::InputTag("muons1stStep"));
   desc.add<std::string>("detector", "HGCAL");

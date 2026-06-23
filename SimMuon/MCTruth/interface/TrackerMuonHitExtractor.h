@@ -8,6 +8,7 @@
 
 #include "DataFormats/CSCRecHit/interface/CSCSegmentCollection.h"
 #include "DataFormats/DTRecHit/interface/DTRecSegment4DCollection.h"
+#include "DataFormats/GEMRecHit/interface/GEMSegmentCollection.h"
 #include "DataFormats/MuonReco/interface/Muon.h"
 #include "DataFormats/MuonReco/interface/MuonFwd.h"
 #include "FWCore/Framework/interface/ConsumesCollector.h"
@@ -26,6 +27,7 @@ public:
 private:
   const edm::EDGetTokenT<DTRecSegment4DCollection> inputDTRecSegment4DToken_;
   const edm::EDGetTokenT<CSCSegmentCollection> inputCSCSegmentToken_;
+  const edm::EDGetTokenT<GEMSegmentCollection> inputGEMSegmentToken_;
 };
 
 #endif

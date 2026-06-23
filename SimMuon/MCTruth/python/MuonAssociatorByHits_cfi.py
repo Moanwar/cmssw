@@ -94,6 +94,7 @@ muonAssociatorByHitsCommonParameters = cms.PSet(
     # to associate to reco::Muon segments 
     inputDTRecSegment4DCollection = cms.InputTag("dt4DSegments"),
     inputCSCSegmentCollection = cms.InputTag("cscSegments"),
+    inputGEMSegmentCollection = cms.InputTag("gemSegments"),
 )
 
 from Configuration.Eras.Modifier_run3_GEM_cff import run3_GEM

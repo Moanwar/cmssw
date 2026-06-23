@@ -22,6 +22,9 @@
 #include "DataFormats/TrackReco/interface/TrackFwd.h"
 #include "CommonTools/Utils/interface/StringCutObjectSelector.h"
 
+#include "DataFormats/GsfTrackReco/interface/GsfTrack.h"
+#include "RecoEgamma/EgammaElectronAlgos/interface/GsfElectronTools.h"
+
 #include "DataFormats/Common/interface/ValueMap.h"
 #include "SimDataFormats/Associations/interface/LayerClusterToSimClusterAssociator.h"
 #include "SimDataFormats/Associations/interface/LayerClusterToCaloParticleAssociator.h"
@@ -101,10 +104,13 @@ private:
 
   const edm::EDGetTokenT<std::vector<reco::Track>> recoTracksToken_;
   const StringCutObjectSelector<reco::Track> cutTk_;
-
+  const edm::EDGetTokenT<reco::GsfTrackCollection> gsf_tracks_token_;
+  
   const edm::EDGetTokenT<reco::SimToRecoCollection> associatormapStRsToken_;
   const edm::EDGetTokenT<reco::RecoToSimCollection> associatormapRtSsToken_;
   const edm::EDGetTokenT<SimTrackToTPMap> associationSimTrackToTPToken_;
+  const edm::EDGetTokenT<reco::SimToRecoCollection> associatormapGsfStRsToken_;
+
 };
 
 DEFINE_FWK_MODULE(SimTrackstersProducer);
@@ -130,8 +136,11 @@ SimTrackstersProducer::SimTrackstersProducer(const edm::ParameterSet& ps)
           consumes<std::vector<TrackingParticle>>(ps.getParameter<edm::InputTag>("trackingParticles"))),
       recoTracksToken_(consumes<std::vector<reco::Track>>(ps.getParameter<edm::InputTag>("recoTracks"))),
       cutTk_(ps.getParameter<std::string>("cutTk")),
+      gsf_tracks_token_(consumes<reco::GsfTrackCollection>(ps.getParameter<edm::InputTag>("gsfTracks"))),
       associatormapStRsToken_(consumes(ps.getParameter<edm::InputTag>("tpToTrack"))),
-      associationSimTrackToTPToken_(consumes(ps.getParameter<edm::InputTag>("simTrackToTPMap"))) {
+      associationSimTrackToTPToken_(consumes(ps.getParameter<edm::InputTag>("simTrackToTPMap"))) ,
+      associatormapGsfStRsToken_(consumes<reco::SimToRecoCollection>(ps.getParameter<edm::InputTag>("tpToGsfTrack"))) {
+
   produces<TracksterCollection>();
   produces<std::vector<float>>();
   produces<TracksterCollection>("fromCPs");
@@ -159,8 +168,10 @@ void SimTrackstersProducer::fillDescriptions(edm::ConfigurationDescriptions& des
   desc.add<std::string>("cutTk",
                         "1.48 < abs(eta) < 3.0 && pt > 1. && quality(\"highPurity\") && "
                         "hitPattern().numberOfLostHits(\"MISSING_OUTER_HITS\") < 5");
+  desc.add<edm::InputTag>("gsfTracks", edm::InputTag("electronGsfTracks"));
   desc.add<edm::InputTag>("tpToTrack", edm::InputTag("trackingParticleRecoTrackAsssociation"));
-
+  desc.add<edm::InputTag>("tpToGsfTrack" , edm::InputTag("trackingParticleGsfTrackAssociation"));
+    
   desc.add<edm::InputTag>("trackingParticles", edm::InputTag("mix", "MergedTrackTruth"));
 
   desc.add<edm::InputTag>("simTrackToTPMap", edm::InputTag("simHitTPAssocProducer", "simTrackToTP"));
@@ -310,6 +321,23 @@ void SimTrackstersProducer::produce(edm::Event& evt, const edm::EventSetup& es) 
   edm::Handle<std::vector<reco::Track>> recoTracks_h;
   evt.getByToken(recoTracksToken_, recoTracks_h);
 
+  edm::Handle<reco::GsfTrackCollection> gsf_tracks_h;
+  evt.getByToken(gsf_tracks_token_, gsf_tracks_h);
+  const reco::GsfTrackCollection* recoGSFTracksPtr = nullptr;
+  if (!gsf_tracks_h.isValid()) {
+    edm::LogWarning("SimTrackstersProducer") << "Missing GSF track collection.";
+  } else {
+    recoGSFTracksPtr = &(*gsf_tracks_h);
+  }
+
+  //edm::Handle<reco::GsfTrackCollection> gsf_tracks_h;
+  //evt.getByToken(gsf_tracks_token_, gsf_tracks_h);
+  //if (!gsf_tracks_h.isValid()) {
+  //edm::LogWarning("SimTrackstersProducer") << "Missing hltEgammaGsfTracksL1Seeded.";
+  //this->returnEmptyCollections(evt, 0);
+  //return;
+  //}
+  
   //TP to reco track map
   const auto TPtoRecoTrackMapHandle = evt.getHandle(associatormapStRsToken_);
   if (!TPtoRecoTrackMapHandle.isValid()) {
@@ -319,8 +347,17 @@ void SimTrackstersProducer::produce(edm::Event& evt, const edm::EventSetup& es) 
   }
   const auto& TPtoRecoTrackMap = *TPtoRecoTrackMapHandle;
 
+  const auto TPtoGsfTrackMapHandle = evt.getHandle(associatormapGsfStRsToken_);
+ const reco::SimToRecoCollection* TPtoGsfTrackMap = nullptr;
+ if (!TPtoGsfTrackMapHandle.isValid()) {
+   edm::LogWarning("SimTrackstersProducer") << "Missing TP->GsfTrack association.";
+ } else {
+   TPtoGsfTrackMap = &(*TPtoGsfTrackMapHandle);
+ }
+  
   const auto& simTrackToTPMap = evt.get(associationSimTrackToTPToken_);
   const auto& recoTracks = *recoTracks_h;
+  //const auto& recoGSFTracks = *gsf_tracks_h;
 
   const auto& geom = es.getData(geom_token_);
   rhtools_.setGeometry(geom);
@@ -420,6 +457,7 @@ void SimTrackstersProducer::produce(edm::Event& evt, const edm::EventSetup& es) 
   }
   // TODO: remove time computation from PCA calculation and
   //       store time from boundary position in simTracksters
+
   ticl::assignPCAtoTracksters(*result,
                               layerClusters,
                               layerClustersTimes,
@@ -470,7 +508,57 @@ void SimTrackstersProducer::produce(edm::Event& evt, const edm::EventSetup& es) 
     return trackIdx;
   };
 
+  auto simTrackToGsfTrack = [&](UniqueSimTrackId simTkId) -> std::vector<int> {
+    std::vector<int> gsfTrackIdx;
+    if (!recoGSFTracksPtr || !TPtoGsfTrackMap) return gsfTrackIdx; 
+    auto ipos = simTrackToTPMap.mapping.find(simTkId);
+    if (ipos != simTrackToTPMap.mapping.end() && TPtoGsfTrackMap) {
+      auto jpos = TPtoGsfTrackMap->find((ipos->second));
+      if (jpos != TPtoGsfTrackMap->end()) {
+	auto& associatedGsfTracks = jpos->val;
+	if (!associatedGsfTracks.empty()) {
+	  if (associatedGsfTracks[0].second > qualityCutTrack_) {
+	    int gsfIndex = associatedGsfTracks[0].first.key();
+	    // Validate the index is within bounds
+	    if (gsfIndex >= 0 && gsfIndex < (int)recoGSFTracksPtr->size()) {
+	      gsfTrackIdx.push_back(gsfIndex);
+	    } else {
+	      edm::LogWarning("SimTrackstersProducer") 
+		<< "Invalid GSF track index: " << gsfIndex 
+		<< " (size: " << recoGSFTracksPtr->size() << ")";
+	    }
+	  }
+	}
+      }
+
+      // Also check daughter tracks
+      const auto& tp = (*ipos->second);
+      if (!tp.decayVertices().empty()) {
+	const auto& iTV = tp.decayVertices()[0];
+	for (auto iTP = iTV->daughterTracks_begin(); iTP != iTV->daughterTracks_end(); ++iTP) {
+	  if (TPtoGsfTrackMap) {
+	    auto kpos = TPtoGsfTrackMap->find((*iTP));
+	    if (kpos != TPtoGsfTrackMap->end()) {
+	      auto& associatedGsfTracks = kpos->val;
+	      if (!associatedGsfTracks.empty()) {
+		//if (associatedGsfTracks[0].second > qualityCutTrack_) {
+		int gsfIndex = associatedGsfTracks[0].first.key();
+		if (gsfIndex >= 0 && gsfIndex < (int)recoGSFTracksPtr->size()) {
+		  gsfTrackIdx.push_back(gsfIndex);
+		  //}
+		}
+	      }
+	    }
+	  }
+	}
+      }
+    }
+    return gsfTrackIdx;
+  };
+ 
+
   // Set the reco track id to SimTrackstersFromCP
+  /*
   auto& simTrackstersFromCP = *result_fromCP;
   for (unsigned int i = 0; i < simTrackstersFromCP.size(); ++i) {
     if (simTrackstersFromCP[i].vertices().empty())
@@ -483,7 +571,37 @@ void SimTrackstersProducer::produce(edm::Event& evt, const edm::EventSetup& es) 
         simTrackstersFromCP[i].addTrackIdx(trackIndex);
     }
   }
+  */
+  auto& simTrackstersFromCP = *result_fromCP;
+  for (unsigned int i = 0; i < simTrackstersFromCP.size(); ++i) {
+    if (simTrackstersFromCP[i].vertices().empty())
+    continue;
+    const auto& simTrack = caloparticles[simTrackstersFromCP[i].seedIndex()].g4Tracks()[0];
+    UniqueSimTrackId simTkIds(simTrack.trackId(), simTrack.eventId());
+    
+    // Add regular track indices
+    auto bestAssociatedRecoTracks = simTrackToRecoTrack(simTkIds);
+    if (not bestAssociatedRecoTracks.empty()) {
+      for (auto const trackIndex : bestAssociatedRecoTracks)
+	simTrackstersFromCP[i].addTrackIdx(trackIndex);
+    }
+    
+  // Add GSF track indices
+    auto bestAssociatedGsfTracks = simTrackToGsfTrack(simTkIds);
+    if (not bestAssociatedGsfTracks.empty()) {
+      for (auto const gsfIndex : bestAssociatedGsfTracks)
+	simTrackstersFromCP[i].addGSFTrackIdx(gsfIndex);
+    }
+ 
 
+    //std::cout << "SimTrackster fromCP [" << i << "] pdgId="
+    //    << caloparticles[simTrackstersFromCP[i].seedIndex()].pdgId()
+    //    << " nGSFtracks=" << simTrackstersFromCP[i].gsftrackIdxs().size() << std::endl;
+    //for (auto const idx : simTrackstersFromCP[i].gsftrackIdxs())
+    //std::cout << "  GSF track index: " << idx << std::endl;
+}
+ 
+  /*
   auto& simTracksters = *result;
   // Set the reco track id to simTracksters
   for (unsigned int i = 0; i < simTracksters.size(); ++i) {
@@ -497,6 +615,35 @@ void SimTrackstersProducer::produce(edm::Event& evt, const edm::EventSetup& es) 
         simTracksters[i].addTrackIdx(trackIndex);
     }
   }
+  */
+  auto& simTracksters = *result;
+for (unsigned int i = 0; i < simTracksters.size(); ++i) {
+  const auto& simTrack = (simTracksters[i].seedID() == caloParticles_h.id())
+                             ? caloparticles[simTracksters[i].seedIndex()].g4Tracks()[0]
+                             : simclusters[simTracksters[i].seedIndex()].g4Tracks()[0];
+  UniqueSimTrackId simTkIds(simTrack.trackId(), simTrack.eventId());
+  
+  // Add regular track indices
+  auto bestAssociatedRecoTracks = simTrackToRecoTrack(simTkIds);
+  if (not bestAssociatedRecoTracks.empty()) {
+    for (auto const trackIndex : bestAssociatedRecoTracks)
+      simTracksters[i].addTrackIdx(trackIndex);
+  }
+  
+  // Add GSF track indices
+  auto bestAssociatedGsfTracks = simTrackToGsfTrack(simTkIds);
+  if (not bestAssociatedGsfTracks.empty()) {
+    for (auto const gsfIndex : bestAssociatedGsfTracks)
+      simTracksters[i].addGSFTrackIdx(gsfIndex);
+  }
+  //std::cout << "SimTrackster [" << i << "] pdgId="
+  //	    << ( simTracksters[i].seedID() == caloParticles_h.id()
+  //		 ? caloparticles[simTracksters[i].seedIndex()].pdgId()
+  //		 : simclusters[simTracksters[i].seedIndex()].pdgId() )
+  //	    << " nGSFtracks=" << simTracksters[i].gsftrackIdxs().size() << std::endl;
+  //for (auto const idx : simTracksters[i].gsftrackIdxs())
+  //std::cout << "  GSF track index: " << idx << std::endl;
+}
 
   edm::OrphanHandle<std::vector<Trackster>> simTracksters_h = evt.put(std::move(result));
 
@@ -525,10 +672,16 @@ void SimTrackstersProducer::produce(edm::Event& evt, const edm::EventSetup& es) 
           cand.addTrackPtr(edm::Ptr<reco::Track>(recoTracks_h, trackIndex));
         }
       }
+      auto gsfTrackIndices = tCP.gsftrackIdxs();
+      if (recoGSFTracksPtr && cand.gsfTrackPtrs().empty() && !gsfTrackIndices.empty() && caloparticles[cp_index].charge() != 0) {
+	for (const auto gsfIndex : gsfTrackIndices) {
+	  cand.addGsfTrackPtr(edm::Ptr<reco::GsfTrack>(gsf_tracks_h, gsfIndex));
+	}
+      }
       toKeep.push_back(cp_index);
     }
   }
-
+  
   auto isHad = [](int pdgId) {
     pdgId = std::abs(pdgId);
     if (pdgId == 111)

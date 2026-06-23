@@ -94,7 +94,7 @@ void FlatRandomEGunProducer::produce(Event& e, const EventSetup& es) {
     if (fAddAntiParticle) {
       HepMC::FourVector ap(-px, -py, -pz, energy);
       int APartID = -PartID;
-      if (PartID == 22 || PartID == 23) {
+      if (PartID == 22 || PartID == 23 || PartID == 130 || PartID == 310) {
         APartID = PartID;
       }
       HepMC::GenParticle* APart = new HepMC::GenParticle(ap, APartID, 1);

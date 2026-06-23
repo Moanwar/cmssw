@@ -1986,6 +1986,7 @@ void TICLDumper::analyze(const edm::Event& event, const edm::EventSetup& setup) 
     superclustering_tree_->Fill();
   if (saveTracks_)
     tracks_tree_->Fill();
+  gsf_tracks_tree_->Fill();
   if (saveSimTICLCandidate_)
     simTICLCandidate_tree->Fill();
   if(saveGenParticles_)

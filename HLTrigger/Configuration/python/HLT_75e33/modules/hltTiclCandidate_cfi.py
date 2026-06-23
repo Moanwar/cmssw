@@ -42,6 +42,8 @@ hltTiclCandidate = cms.EDProducer("TICLCandidateProducer",
     timingQualityThreshold = cms.double(0.5),
     timingSoA = cms.InputTag("mtdSoA"),
     tracks = cms.InputTag("hltGeneralTracks"),
+    #gsfTracks = cms.InputTag('hltActivityElectronGsfTracks'),
+    gsfTracks = cms.InputTag('hltEgammaGsfTracksUnseeded'),
     useMTDTiming = cms.bool(False),
     useTimingAverage = cms.bool(False)
 )

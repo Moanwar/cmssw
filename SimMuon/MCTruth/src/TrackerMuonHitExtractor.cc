@@ -4,6 +4,7 @@
 // UserCode/luthra/MuonTrackSelector/src/MuonTrackSelector.cc
 //
 #include "DataFormats/MuonDetId/interface/CSCDetId.h"
+#include "DataFormats/MuonDetId/interface/GEMDetId.h"
 #include "DataFormats/MuonDetId/interface/DTChamberId.h"
 #include "DataFormats/MuonDetId/interface/MuonSubdetId.h"
 #include "DataFormats/MuonReco/interface/MuonSelectors.h"
@@ -17,11 +18,14 @@ TrackerMuonHitExtractor::TrackerMuonHitExtractor(const edm::ParameterSet &parset
     : inputDTRecSegment4DToken_(
           ic.consumes<DTRecSegment4DCollection>(parset.getParameter<edm::InputTag>("inputDTRecSegment4DCollection"))),
       inputCSCSegmentToken_(
-          ic.consumes<CSCSegmentCollection>(parset.getParameter<edm::InputTag>("inputCSCSegmentCollection"))) {}
+          ic.consumes<CSCSegmentCollection>(parset.getParameter<edm::InputTag>("inputCSCSegmentCollection"))),
+      inputGEMSegmentToken_(
+          ic.consumes<GEMSegmentCollection>(parset.getParameter<edm::InputTag>("inputGEMSegmentCollection"))){}
 
 void TrackerMuonHitExtractor::init(const edm::Event &iEvent) {
   const edm::Handle<DTRecSegment4DCollection> &dtSegmentCollectionH = iEvent.getHandle(inputDTRecSegment4DToken_);
   const edm::Handle<CSCSegmentCollection> &cscSegmentCollectionH = iEvent.getHandle(inputCSCSegmentToken_);
+  const edm::Handle<GEMSegmentCollection> &gemSegmentCollectionH = iEvent.getHandle(inputGEMSegmentToken_);
 
   edm::LogVerbatim("TrackerMuonHitExtractor") << "\nThere are " << dtSegmentCollectionH->size() << " DT segments.";
   unsigned int index_dt_segment = 0;
@@ -88,6 +92,39 @@ void TrackerMuonHitExtractor::init(const edm::Event &iEvent) {
         << "Local Direction (dXdZ,dYdZ)=(" << segmentdXdZ << "," << segmentdYdZ << ") +/- (" << segmentdXdZerr << ","
         << segmentdYdZerr << ")";
   }
+  edm::LogVerbatim("TrackerMuonHitExtractor") << "\nThere are " << gemSegmentCollectionH->size() << " GEM segments.";
+  unsigned int index_gem_segment = 0;
+  for (GEMSegmentCollection::const_iterator segment = gemSegmentCollectionH->begin();
+       segment != gemSegmentCollectionH->end();
+       ++segment, index_gem_segment++) {
+    LocalPoint segmentLocalPosition = segment->localPosition();
+    LocalVector segmentLocalDirection = segment->localDirection();
+    LocalError segmentLocalPositionError = segment->localPositionError();
+    LocalError segmentLocalDirectionError = segment->localDirectionError();
+
+    DetId geoid = segment->geographicalId();
+    GEMDetId gemdetid = GEMDetId(geoid);
+    int endcap = gemdetid.region();
+    int station = gemdetid.station();
+    int ring = gemdetid.ring();
+    int chamber = gemdetid.chamber();
+
+    float segmentX = segmentLocalPosition.x();
+    float segmentY = segmentLocalPosition.y();
+    float segmentdXdZ = segmentLocalDirection.x() / segmentLocalDirection.z();
+    float segmentdYdZ = segmentLocalDirection.y() / segmentLocalDirection.z();
+    float segmentXerr = sqrt(segmentLocalPositionError.xx());
+    float segmentYerr = sqrt(segmentLocalPositionError.yy());
+    float segmentdXdZerr = sqrt(segmentLocalDirectionError.xx());
+    float segmentdYdZerr = sqrt(segmentLocalDirectionError.yy());
+
+    edm::LogVerbatim("TrackerMuonHitExtractor")
+        << "\nGEM segment index :" << index_csc_segment << "\nchamber Endcap:" << endcap << ",St:" << station
+        << ",Ri:" << ring << ",Ch:" << chamber << "\nLocal Position (X,Y)=(" << segmentX << "," << segmentY << ") +/- ("
+        << segmentXerr << "," << segmentYerr << "), "
+        << "Local Direction (dXdZ,dYdZ)=(" << segmentdXdZ << "," << segmentdYdZ << ") +/- (" << segmentdXdZerr << ","
+        << segmentdYdZerr << ")";
+  }
 }
 std::vector<const TrackingRecHit *> TrackerMuonHitExtractor::getMuonHits(const reco::Muon &mu) const {
   std::vector<const TrackingRecHit *> ret;
@@ -125,11 +162,19 @@ std::vector<const TrackingRecHit *> TrackerMuonHitExtractor::getMuonHits(const r
       chamber = cscdetid.chamber();
       chamberStr << ", CSC chamber End:" << endcap << ",St:" << station << ",Ri:" << ring << ",Ch:" << chamber;
     }
+    else if (subdet == MuonSubdetId::GEM) {
+      GEMDetId gemdetid = GEMDetId(did);
+      endcap = gemdetid.region();
+      station = gemdetid.station();
+      ring = gemdetid.ring();
+      chamber = gemdetid.chamber();
+      chamberStr << ", GEM chamber End:" << endcap << ",St:" << station << ",Ri:" << ring << ",Ch:" << chamber;
+
+    }
 
     chamberStr << ", Number of segments: " << chamberMatch->segmentMatches.size();
     edm::LogVerbatim("TrackerMuonHitExtractor") << chamberStr.str();
     n_segments_noArb = n_segments_noArb + chamberMatch->segmentMatches.size();
-
     unsigned int index_segment = 0;
 
     for (std::vector<reco::MuonSegmentMatch>::const_iterator segmentMatch = chamberMatch->segmentMatches.begin();
@@ -218,9 +263,38 @@ std::vector<const TrackingRecHit *> TrackerMuonHitExtractor::getMuonHits(const r
         } else
           edm::LogWarning("TrackerMuonHitExtractor") << "\n***WARNING: UNMATCHED CSC segment ! \n";
       }  // else if (subdet == MuonSubdetId::CSC)
-
     }  // loop on vector<MuonSegmentMatch>
-  }  // loop on vector<MuonChamberMatch>
+    for (std::vector<reco::MuonSegmentMatch>::const_iterator segmentMatch = chamberMatch->gemMatches.begin();
+        segmentMatch != chamberMatch->gemMatches.end();
+        ++segmentMatch, index_segment++) {
+
+      float segmentX = segmentMatch->x;
+      float segmentY = segmentMatch->y;
+      float segmentdXdZ = segmentMatch->dXdZ;
+      float segmentdYdZ = segmentMatch->dYdZ;
+      float segmentXerr = segmentMatch->xErr;
+      float segmentYerr = segmentMatch->yErr;
+      float segmentdXdZerr = segmentMatch->dXdZErr;
+      float segmentdYdZerr = segmentMatch->dYdZErr;
+
+      GEMSegmentRef segmentGEM = segmentMatch->gemSegmentRef;
+      const GEMSegment *segment = segmentGEM.get();
+
+      bool segment_arbitrated_Ok = (
+          segmentMatch->isMask(reco::MuonSegmentMatch::BestInChamberByDR) &&
+          segmentMatch->isMask(reco::MuonSegmentMatch::BelongsToTrackByDR));
+
+      std::string ARBITRATED = segment_arbitrated_Ok ? " ***ARBITRATED OK*** " : " ***Arbitrated Off*** ";
+
+
+      std::vector<const TrackingRecHit *> gemHits = segment->recHits();
+
+        for (size_t i = 0; i < gemHits.size(); ++i) {
+          const TrackingRecHit *hit = gemHits[i];
+          ret.push_back(hit);
+      }
+    }
+  }    // loop on vector<MuonChamberMatch>
 
   edm::LogVerbatim("TrackerMuonHitExtractor") << "\n N. matched Segments before arbitration = " << n_segments_noArb;
 

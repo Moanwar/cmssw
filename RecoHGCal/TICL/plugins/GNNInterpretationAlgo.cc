@@ -345,7 +345,9 @@ void GNNInterpretationAlgo::buildGraphFromNodes(const std::tuple<Vector, Algebra
 void GNNInterpretationAlgo::makeCandidates(const Inputs& input,
                                            edm::Handle<MtdHostCollection> inputTiming_h,
                                            std::vector<Trackster>& resultTracksters,
-                                           std::vector<int>& resultCandidate) {
+                                           std::vector<int>& resultCandidate,
+					   std::vector<std::vector<unsigned int>> &linkedResultTracksters) {
+
   const auto& tracks = *input.tracksHandle;
   const auto& maskTracks = input.maskedTracks;
   const auto& tracksters = input.tracksters;
@@ -525,6 +527,8 @@ void GNNInterpretationAlgo::makeCandidates(const Inputs& input,
   }
   // Build output tracksters
 
+  linkedResultTracksters.reserve(input.tracksters.size());
+  
   for (unsigned trkId = 0; trkId < trackToTracksters.size(); ++trkId) {
     if (trackToTracksters[trkId].empty())
       continue;
@@ -542,15 +546,16 @@ void GNNInterpretationAlgo::makeCandidates(const Inputs& input,
         hasHadron |= tracksters[tsId].isHadronic();
       merged.setIdProbability(hasHadron ? Trackster::ParticleType::charged_hadron : Trackster::ParticleType::electron,
                               1.f);
-
       resultTracksters.push_back(std::move(merged));
+      linkedResultTracksters.push_back(trackToTracksters[trkId]);
     }
   }
 
   // Add unlinked tracksters
-  for (unsigned i = 0; i < tracksters.size(); ++i) {
-    if (tracksterAvailable[i])
-      resultTracksters.push_back(tracksters[i]);
+  for (auto iTrackster = 0u; iTrackster < input.tracksters.size(); iTrackster++) {
+    if (tracksterAvailable[iTrackster])
+      resultTracksters.push_back(tracksters[iTrackster]);
+    linkedResultTracksters.push_back({iTrackster});
   }
 }
 

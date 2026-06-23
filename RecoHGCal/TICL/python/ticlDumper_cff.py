@@ -45,8 +45,10 @@ ticlDumper = ticlDumper_.clone(
 )
 
 ticl_v5.toModify(ticlDumper, 
+                 gsfTracks = cms.InputTag("electronGsfTracks"),
                  ticlcandidates = cms.InputTag("ticlCandidate"), 
                  recoSuperClusters_sourceTracksterCollection=cms.InputTag("ticlTrackstersCLUE3DHigh"), 
+                 linkedTracksters = cms.InputTag("ticlCandidate", "linkedTracksters"),
                  saveSuperclustering = cms.bool(True), 
                  trackstersInCand=cms.InputTag("ticlCandidate"))
 
