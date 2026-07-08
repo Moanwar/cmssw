@@ -187,9 +187,11 @@ mtdSoATask = cms.Task(mtdSoA)
 
 ticlCandidateTask = cms.Task(ticlCandidate)
 
+def _use_mlpf_producer(task):
+    task.remove(ticlCandidateTask)
+    task.add(mlpfProducerTask)
+
 mlpfProducerTask = cms.Task(mlpfProducer)
-ticl_mlpf.toReplaceWith(ticlCandidateTask, mlpfProducerTask)
-ticl_mlpf.toModify(pfTICL, ticlCandidateSrc=cms.InputTag('mlpfProducer'))
 
 # iterTICLTask default for v5
 iterTICLTask = cms.Task(
@@ -198,6 +200,9 @@ iterTICLTask = cms.Task(
     ticlCandidateTask,
     ticlPFTask
 )
+
+ticl_mlpf.toModify(iterTICLTask, func=_use_mlpf_producer)
+ticl_mlpf.toModify(pfTICL, ticlCandidateSrc=cms.InputTag('mlpfProducer'))
 
 
 # HFNose remains on legacy iterations

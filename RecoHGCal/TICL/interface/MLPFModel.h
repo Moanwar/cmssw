@@ -66,7 +66,13 @@ namespace ticl {
     enum ElementType { kTrack = 1, kEmTrackster = 2, kHadTrackster = 3, kGsfTrack = 4 };
 
     // ------------------------------------------------------------------------------------
-    // Output layout
+    // Output layout -- matches the actual exported ONNX graph inspected directly:
+    //   input  "X"          [batch, n_elements, 35]  float32
+    //   input  "mask"       [batch, n_elements]       bool     <-- NOT float, see MLPFProducer TODO
+    //   output "cls_binary" [batch, n_elements, 2]    float32
+    //   output "cls_pid"    [batch, n_elements, 6]    float32
+    //   output "momentum"   [batch, n_elements, 5]    float32
+    //   output "ispu"       [batch, n_elements, 2]    float32  (unused for candidate building so far)
     // ------------------------------------------------------------------------------------
     // 6-class PID head: [0=none, 1=ch.had, 2=n.had, 3=gamma, 4=ele, 5=mu]
     constexpr unsigned int NUM_PID_CLASSES = 6;

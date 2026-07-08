@@ -1,78 +1,91 @@
-// Author: Mohamed Darwish mohamed.anwar@cern.ch
 // MLPFProducer: replaces TICLCandidateProducer's linking+PID+regression chain with a single
-// MLPF (Machine Learning Particle Flow) model that classifies each input element (track,
-// GSF track, EM trackster, HAD trackster) independently and regresses its own kinematics.
+// MLPF/HEPTv2 model that classifies each input element (track, GSF track, EM trackster, HAD
+// trackster) independently and regresses its own kinematics.
+//
+// ONNX inference follows the same pattern as TracksterInferenceByPFN.cc / TICLCandidateProducer.cc:
+// a single ticl::TICLONNXGlobalCache resolves sessions by model-path string, and inference goes
+// through ONNXRuntime::runInto(...) with a reusable OrtScratch buffer.
+//
+// IMPORTANT DIFFERENCE from TracksterInferenceByPFN's mini-batch loop: that algorithm's "batch"
+// dimension is independent tracksters (no cross-trackster attention), so chunking into
+// mini-batches of 64 is safe. MLPF/HEPTv2 is a set-transformer where elements attend to EACH
+// OTHER across the whole event -- splitting n_elements into mini-batches would silently cut
+// real attention edges. So this producer makes exactly ONE runInto() call per event, with the
+// full element count as the sequence length and batch dimension fixed at 1.
+//
+// Design (agreed in the integration discussion, see project notes):
+//   - Skips GeneralInterpretationAlgo entirely: no track<->trackster linking/merging step.
+//   - Still consumes tracksters from TracksterLinksProducer (the model was trained on that
+//     collection), NOT the raw per-pattern-recognition-algo tracksters.
+//   - One non-"none" element prediction => exactly one TICLCandidate (track-only,
+//     trackster-only, or GSF-track-only). No merging of multiple elements into one candidate.
+//   - Does NOT call PFMuonAlgo to decide muon-or-not: that decision is the network's own
+//     argmax==kMu. PFTICLProducer downstream still calls PFMuonAlgo, but only to refine
+//     kinematics of candidates that already have abs(pdgId)==13.
 //
 // TODO before this is production-ready:
-//   - Confirm the actual ONNX graph's output tensor names/order against onnxOutputNames_.
-//   - nn_had_binary override for typ==3 (HAD_TS) elements is stubbed via useHadBinary_ but the
-//     override logic itself is not yet implemented -- needs the exact 11-feature input spec.
-//   - GSF track source collection / EDGetToken needs to point at the (not-yet-merged) branch
-//     that exposes GSF tracks to TICL.
+//   - mask dtype: the exported graph declares "mask" as BOOL. This code currently builds a
+//     float 0/1 mask (matching OrtScratch's float-only buffers as seen in TracksterInferenceByPFN)
+//     and relies on ONNXRuntime accepting/casting it. If the session enforces strict BOOL typing,
+//     this will fail at runInto() -- the safe fix is to re-export the graph with `mask` declared
+//     as float32 and an internal Cast-to-bool node, rather than inventing new bool-tensor plumbing
+//     in ONNXRuntime here. VERIFY THIS FIRST with a standalone runInto() smoke test.
+//   - nn_had_binary / had-trackster override: not present in this exported graph at all (only
+//     cls_binary/cls_pid/momentum/ispu exist) -- so useHadBinaryOverride_ is currently a no-op.
+//     Revisit once/if a had-binary head is added to a future export.
+//   - `ispu` output is unused for candidate building; exists in the graph but not consumed here.
+//   - Candidate construction (Ptr plumbing, TICLCandidate assembly) still pending -- this file
+//     focuses on getting inference itself onto the right API; see produce()'s final TODO block.
 
 #include <memory>
 #include <vector>
-#include "DataFormats/Common/interface/MultiSpan.h"
+
 #include "FWCore/Framework/interface/stream/EDProducer.h"
-#include "FWCore/ParameterSet/interface/ParameterSet.h"
-#include "FWCore/ParameterSet/interface/ConfigurationDescriptions.h"
-#include "FWCore/ParameterSet/interface/PluginDescription.h"
-#include "FWCore/MessageLogger/interface/MessageLogger.h"
-#include "FWCore/Utilities/interface/ESGetToken.h"
-#include "FWCore/Framework/interface/ESHandle.h"
+#include "FWCore/Framework/interface/Event.h"
 #include "FWCore/Framework/interface/Frameworkfwd.h"
 #include "FWCore/Framework/interface/MakerMacros.h"
+#include "FWCore/ParameterSet/interface/ParameterSet.h"
+#include "FWCore/ParameterSet/interface/ConfigurationDescriptions.h"
 #include "FWCore/ParameterSet/interface/ParameterSetDescription.h"
-#include "FWCore/Framework/interface/ConsumesCollector.h"
-#include "DataFormats/Common/interface/OrphanHandle.h"
+#include "FWCore/MessageLogger/interface/MessageLogger.h"
 
-#include "FWCore/Framework/interface/Event.h"
-
-#include "FWCore/AbstractServices/interface/ResourceInformation.h"
-#include "FWCore/ServiceRegistry/interface/Service.h"
-
+#include "DataFormats/Common/interface/Handle.h"
 #include "DataFormats/TrackReco/interface/Track.h"
 #include "DataFormats/GsfTrackReco/interface/GsfTrack.h"
 #include "DataFormats/MuonReco/interface/Muon.h"
 #include "DataFormats/HGCalReco/interface/Trackster.h"
 #include "DataFormats/HGCalReco/interface/TICLCandidate.h"
-#include "RecoParticleFlow/PFProducer/interface/PFMuonAlgo.h"
-
 
 #include "RecoHGCal/TICL/interface/TICLONNXGlobalCache.h"
-#include "PhysicsTools/ONNXRuntime/interface/ONNXRuntime.h"
 #include "RecoParticleFlow/PFProducer/interface/PFMuonAlgo.h"
 
 #include "RecoHGCal/TICL/interface/MLPFModel.h"
 #include "RecoHGCal/TICL/interface/MLPFElementFeatures.h"
 
-using namespace cms::Ort;
-
-class MLPFProducer : public edm::stream::EDProducer<edm::GlobalCache<ONNXRuntime>> {
+class MLPFProducer : public edm::stream::EDProducer<edm::GlobalCache<ticl::TICLONNXGlobalCache>> {
 public:
-  explicit MLPFProducer(const edm::ParameterSet&, const ONNXRuntime*);
+  explicit MLPFProducer(const edm::ParameterSet&, const ticl::TICLONNXGlobalCache*);
   ~MLPFProducer() override = default;
 
   void produce(edm::Event&, const edm::EventSetup&) override;
   static void fillDescriptions(edm::ConfigurationDescriptions& descriptions);
 
-  static std::unique_ptr<ONNXRuntime> initializeGlobalCache(const edm::ParameterSet&);
-  static void globalEndJob(const ONNXRuntime*) {}
+  static std::unique_ptr<ticl::TICLONNXGlobalCache> initializeGlobalCache(const edm::ParameterSet& iConfig) {
+    return ticl::TICLONNXGlobalCache::initialize(iConfig);
+  }
+  static void globalEndJob(const ticl::TICLONNXGlobalCache*) {}
 
 private:
-  // One entry per element fed to the network, tracking where it came from so we can build
-  // the right TICLCandidate afterwards.
   struct ElementSource {
-    int type = 0;  // ticl::mlpf::ElementType
+    int type = 0;            // ticl::mlpf::ElementType
     unsigned int index = 0;  // index into the corresponding source collection
   };
 
-  // Builds the ordered element list + input tensor + mask for one event.
   // Order: GSF tracks, tracks, EM tracksters, HAD tracksters (matches training-side
   // prepare_normalized_table() ordering convention).
   void buildInputs(const std::vector<reco::GsfTrack>& gsfTracks,
                     const std::vector<reco::Track>& tracks,
-                    const std::vector<reco::MuonRef>& trackMuonRefs,  // parallel to tracks, may be null
+                    const std::vector<reco::MuonRef>& trackMuonRefs,
                     const std::vector<ticl::Trackster>& emTracksters,
                     const std::vector<ticl::Trackster>& hadTracksters,
                     std::vector<ElementSource>& elementSources,
@@ -85,32 +98,32 @@ private:
   const edm::EDGetTokenT<std::vector<ticl::Trackster>> hadTrackstersToken_;
   const edm::EDGetTokenT<std::vector<reco::Muon>> muonsToken_;
 
+  const std::string modelPath_;
   const bool useHadBinaryOverride_;
-  const std::vector<std::string> onnxOutputNames_;  // e.g. {"binary", "pid", "momentum"[, "had_binary"]}
+  const std::vector<std::string> onnxInputNames_;   // {"X", "mask"}
+  const std::vector<std::string> onnxOutputNames_;  // {"cls_binary", "cls_pid", "momentum", "ispu"}
+
+  // Resolved once in the constructor from the global cache; valid for the whole job.
+  const cms::Ort::ONNXRuntime* onnxSession_ = nullptr;
 };
 
-MLPFProducer::MLPFProducer(const edm::ParameterSet& ps, const ONNXRuntime* /*cache*/)
+MLPFProducer::MLPFProducer(const edm::ParameterSet& ps, const ticl::TICLONNXGlobalCache* cache)
     : tracksToken_(consumes<std::vector<reco::Track>>(ps.getParameter<edm::InputTag>("tracks"))),
       gsfTracksToken_(consumes<std::vector<reco::GsfTrack>>(ps.getParameter<edm::InputTag>("gsfTracks"))),
       emTrackstersToken_(consumes<std::vector<ticl::Trackster>>(ps.getParameter<edm::InputTag>("emTracksters"))),
       hadTrackstersToken_(consumes<std::vector<ticl::Trackster>>(ps.getParameter<edm::InputTag>("hadTracksters"))),
       muonsToken_(consumes<std::vector<reco::Muon>>(ps.getParameter<edm::InputTag>("muons"))),
+      modelPath_(ps.getParameter<edm::FileInPath>("modelPath").fullPath()),
       useHadBinaryOverride_(ps.getParameter<bool>("useHadBinaryOverride")),
+      onnxInputNames_(ps.getParameter<std::vector<std::string>>("onnxInputNames")),
       onnxOutputNames_(ps.getParameter<std::vector<std::string>>("onnxOutputNames")) {
-  produces<std::vector<TICLCandidate>>();
-}
-
-std::unique_ptr<ONNXRuntime> MLPFProducer::initializeGlobalCache(const edm::ParameterSet& params) {
-  edm::Service<edm::ResourceInformation> ri;
-  Backend backend = Backend::cpu;
-  if (ri.isAvailable() && ri->hasGpuNvidia()) {
-    backend = Backend::cuda;
-    edm::LogInfo("MLPFProducer") << "NVIDIA GPU detected, running MLPF ONNX model on CUDA.";
-  } else {
-    edm::LogInfo("MLPFProducer") << "No NVIDIA GPU detected, running MLPF ONNX model on CPU.";
+  if (cache != nullptr) {
+    onnxSession_ = cache->getByModelPathString(modelPath_);
   }
-  auto sessionOptions = ONNXRuntime::defaultSessionOptions(backend);
-  return std::make_unique<ONNXRuntime>(params.getParameter<edm::FileInPath>("modelPath").fullPath(), &sessionOptions);
+  if (onnxSession_ == nullptr) {
+    throw cms::Exception("MLPFProducer") << "Could not resolve ONNX session for model path: " << modelPath_;
+  }
+  produces<std::vector<TICLCandidate>>();
 }
 
 void MLPFProducer::buildInputs(const std::vector<reco::GsfTrack>& gsfTracks,
@@ -141,16 +154,17 @@ void MLPFProducer::buildInputs(const std::vector<reco::GsfTrack>& gsfTracks,
 
   for (unsigned int i = 0; i < tracks.size(); ++i) {
     elementSources.push_back({kTrack, i});
-    const reco::Muon* muon = (i < trackMuonRefs.size() && trackMuonRefs[i].isNonnull()) ? trackMuonRefs[i].get() : nullptr;
-    // hasGsfMatch left false here -- TODO wire up an actual track<->GSF association once the
-    // GSF collection's provenance/matching convention is settled.
+    const reco::Muon* muon =
+        (i < trackMuonRefs.size() && trackMuonRefs[i].isNonnull()) ? trackMuonRefs[i].get() : nullptr;
+    // hasGsfMatch left false -- TODO wire up a real track<->GSF association once the GSF
+    // collection's provenance/matching convention is settled.
     appendFeatures(buildTrackFeatures(tracks[i], muon, /*hasGsfMatch=*/false));
   }
 
   for (unsigned int i = 0; i < emTracksters.size(); ++i) {
     elementSources.push_back({kEmTrackster, i});
-    const auto neighbors =
-        computeTracksterNeighborFeatures(emTracksters[i].barycenter().eta(), emTracksters[i].barycenter().phi(), tracks);
+    const auto neighbors = computeTracksterNeighborFeatures(
+        emTracksters[i].barycenter().eta(), emTracksters[i].barycenter().phi(), tracks);
     appendFeatures(buildTracksterFeatures(emTracksters[i], kEmTrackster, neighbors));
   }
 
@@ -165,7 +179,10 @@ void MLPFProducer::buildInputs(const std::vector<reco::GsfTrack>& gsfTracks,
 void MLPFProducer::produce(edm::Event& evt, const edm::EventSetup&) {
   using namespace ticl::mlpf;
 
-  const auto& tracks = evt.get(tracksToken_);
+  edm::Handle<std::vector<reco::Track>> tracksHandle;
+  evt.getByToken(tracksToken_, tracksHandle);
+  const auto& tracks = *tracksHandle;
+
   const auto& gsfTracks = evt.get(gsfTracksToken_);
   const auto& emTracksters = evt.get(emTrackstersToken_);
   const auto& hadTracksters = evt.get(hadTrackstersToken_);
@@ -173,12 +190,10 @@ void MLPFProducer::produce(edm::Event& evt, const edm::EventSetup&) {
   edm::Handle<std::vector<reco::Muon>> muonsHandle;
   evt.getByToken(muonsToken_, muonsHandle);
 
-  // Per-track muon association, same lookup TICLCandidateProducer::filterTracks does via
-  // PFMuonAlgo::muAssocToTrack -- needed as a *feature* here (track_muon_type etc.), not to
-  // gate/refine candidates (that refinement still happens downstream in PFTICLProducer).
+  // Per-track muon association used purely as an input FEATURE (track_muon_type etc.), matching
+  // what the training-side dumper baked into the 35-feature vector. This does NOT decide
+  // muon-or-not -- that's the network's own argmax==kMu, applied further down.
   std::vector<reco::MuonRef> trackMuonRefs(tracks.size());
-  edm::Handle<std::vector<reco::Track>> tracksHandle;
-  evt.getByToken(tracksToken_, tracksHandle);
   for (unsigned int i = 0; i < tracks.size(); ++i) {
     reco::TrackRef trackRef(tracksHandle, i);
     const int muId = PFMuonAlgo::muAssocToTrack(trackRef, *muonsHandle);
@@ -192,7 +207,7 @@ void MLPFProducer::produce(edm::Event& evt, const edm::EventSetup&) {
   std::vector<float> maskVec;
   buildInputs(gsfTracks, tracks, trackMuonRefs, emTracksters, hadTracksters, elementSources, flatFeatures, maskVec);
 
-  const auto nElem = elementSources.size();
+  const int nElem = static_cast<int>(elementSources.size());
   auto resultCandidates = std::make_unique<std::vector<TICLCandidate>>();
 
   if (nElem == 0) {
@@ -200,46 +215,51 @@ void MLPFProducer::produce(edm::Event& evt, const edm::EventSetup&) {
     return;
   }
 
-  std::vector<std::vector<float>> inputs;
-  inputs.push_back(std::move(flatFeatures));
-  inputs.push_back(std::move(maskVec));
+  // Single runInto() call for the whole event -- see file-header note on why this must NOT be
+  // mini-batched the way TracksterInferenceByPFN batches independent tracksters.
+  std::vector<std::vector<float>> inputs(2);
+  inputs[0] = flatFeatures;  // kept (not moved) -- decodeMomentum() below needs the original
+                             // input pt/energy per element after inference runs.
+  inputs[1] = maskVec;       // TODO: see mask-dtype note at top of file.
 
-  const auto outputs = globalCache()->run(
-      {"Xfeat_normed", "mask"},
-      inputs,
-      {{1, static_cast<int64_t>(nElem), static_cast<int64_t>(NUM_ELEMENT_FEATURES)}, {1, static_cast<int64_t>(nElem)}});
+  std::vector<std::vector<int64_t>> inputShapes(2);
+  inputShapes[0] = {1, nElem, static_cast<int64_t>(NUM_ELEMENT_FEATURES)};
+  inputShapes[1] = {1, nElem};
 
-  // TODO: confirm this index<->name mapping against the real exported graph; assuming
-  // onnxOutputNames_ == {"binary", "pid", "momentum"} in that order for now.
+  std::vector<std::vector<float>> outputs;
+  onnxSession_->runInto(onnxInputNames_, inputs, inputShapes, onnxOutputNames_, outputs, {}, /*batchSize=*/1);
+
+  if (outputs.size() < 3) {
+    throw cms::Exception("MLPFProducer") << "Expected at least 3 ONNX outputs (cls_binary, cls_pid, momentum), got "
+                                          << outputs.size();
+  }
   const auto& outBinary = outputs[0];
   const auto& outPid = outputs[1];
   const auto& outMomentum = outputs[2];
+  // outputs[3], if present, is "ispu" -- unused here.
 
-  for (unsigned int ielem = 0; ielem < nElem; ++ielem) {
-    const float logitNoParticle = outBinary[ielem * NUM_BINARY_CLASSES + 0];
-    const float logitParticle = outBinary[ielem * NUM_BINARY_CLASSES + 1];
+  for (int ielem = 0; ielem < nElem; ++ielem) {
+    const float logitNoParticle = outBinary[static_cast<size_t>(ielem) * NUM_BINARY_CLASSES + 0];
+    const float logitParticle = outBinary[static_cast<size_t>(ielem) * NUM_BINARY_CLASSES + 1];
     if (logitParticle <= logitNoParticle)
       continue;  // binary gate says "none" -- no candidate for this element
 
     const float* pidScores = &outPid[static_cast<size_t>(ielem) * NUM_PID_CLASSES];
-    int predictedClass = argmaxPidClass(pidScores);
+    const int predictedClass = argmaxPidClass(pidScores);
 
-    // TODO: implement the nn_had_binary override here for HAD_TS elements once the 11-feature
-    // input to that head is confirmed; currently the main PID head's decision stands as-is.
-    if (useHadBinaryOverride_ && elementSources[ielem].type == kHadTrackster) {
-      // placeholder -- no-op until the override is implemented
-    }
+    // useHadBinaryOverride_ is currently a no-op: this exported graph has no had-binary output
+    // to override with (see file-header TODO). Left here as the hook point for when it exists.
+    (void)useHadBinaryOverride_;
 
     if (predictedClass == kNone)
       continue;
 
-    const float* rawMomentum = &outMomentum[static_cast<size_t>(ielem) * NUM_MOMENTUM_FEATURES];
-    const float inputPt = flatFeatures.empty() ? 0.f : 0.f;  // placeholder, see note below
-    // NOTE: flatFeatures was moved into `inputs` above; re-reading the original input pt/energy
-    // for the decode step requires keeping a non-moved copy. Fixed properly below by not moving.
-    (void)inputPt;
-
     const auto& src = elementSources[ielem];
+    const float inputPt = flatFeatures[static_cast<size_t>(ielem) * NUM_ELEMENT_FEATURES + kPt];
+    const float inputEnergy = flatFeatures[static_cast<size_t>(ielem) * NUM_ELEMENT_FEATURES + kEnergy];
+    const float* rawMomentum = &outMomentum[static_cast<size_t>(ielem) * NUM_MOMENTUM_FEATURES];
+    const auto decoded = decodeMomentum(rawMomentum, inputPt, inputEnergy);
+
     int charge = 0;
     if (src.type == kTrack) {
       charge = tracks[src.index].charge();
@@ -247,15 +267,15 @@ void MLPFProducer::produce(edm::Event& evt, const edm::EventSetup&) {
       charge = gsfTracks[src.index].charge();
     }
     const int pdgId = pdgIdFromClass(predictedClass, charge);
-    (void)pdgId;  // used once candidate construction below is filled in
+    (void)pdgId;
+    (void)decoded;
 
-    // TODO: construct the actual TICLCandidate here via the matching constructor
-    // (track-only / trackster-only / gsf-track-only), using ticl::mlpf::decodeMomentum(...)
-    // for the kinematics and pdgId computed above. Left as a stub pending the edm::Ptr
-    // plumbing decision (candidates need Ptr<reco::Track>/Ptr<Trackster>/Ptr<reco::GsfTrack>
-    // into the *original event collections*, which requires switching tracks/gsfTracks/
-    // emTracksters/hadTracksters above from evt.get(...) to edm::Handle-based access so we
-    // have OrphanHandles/Ptrs to build against).
+    // TODO: construct the actual TICLCandidate here (default ctor + addTrackPtr / addTrackster /
+    // addGsfTrackPtr depending on src.type, then setPdgId/setCharge/setP4/setRawEnergy from
+    // `decoded` and `pdgId` above) -- needs edm::Ptr into the ORIGINAL collections, i.e.
+    // switching gsfTracks/emTracksters/hadTracksters above from evt.get(...) to
+    // edm::Handle-based access the same way tracksHandle already is, so OrphanHandles/Ptrs are
+    // available here. Left as the next concrete step.
   }
 
   evt.put(std::move(resultCandidates));
@@ -264,13 +284,14 @@ void MLPFProducer::produce(edm::Event& evt, const edm::EventSetup&) {
 void MLPFProducer::fillDescriptions(edm::ConfigurationDescriptions& descriptions) {
   edm::ParameterSetDescription desc;
   desc.add<edm::InputTag>("tracks", edm::InputTag("generalTracks"));
-  desc.add<edm::InputTag>("gsfTracks", edm::InputTag("mlpfGsfTracks"));  // TODO: real collection label
+  desc.add<edm::InputTag>("gsfTracks", edm::InputTag("electronGsfTracks"));  // TODO: confirm real label
   desc.add<edm::InputTag>("emTracksters", edm::InputTag("ticlTracksterLinksSuperclusteringDNN"));
   desc.add<edm::InputTag>("hadTracksters", edm::InputTag("ticlTracksterLinks"));
   desc.add<edm::InputTag>("muons", edm::InputTag("muons1stStep"));
   desc.add<edm::FileInPath>("modelPath", edm::FileInPath("RecoHGCal/TICL/data/mlpf/mlpf_hgcal.onnx"));
   desc.add<bool>("useHadBinaryOverride", true);
-  desc.add<std::vector<std::string>>("onnxOutputNames", {"binary", "pid", "momentum"});
+  desc.add<std::vector<std::string>>("onnxInputNames", {"X", "mask"});
+  desc.add<std::vector<std::string>>("onnxOutputNames", {"cls_binary", "cls_pid", "momentum", "ispu"});
   descriptions.add("mlpfProducer", desc);
 }
 
