@@ -18,9 +18,11 @@ from RecoHGCal.TICL.pfTICLProducer_cfi import pfTICLProducer as _pfTICLProducer
 from RecoHGCal.TICL.tracksterLinksProducer_cfi import tracksterLinksProducer as _tracksterLinksProducer
 from RecoHGCal.TICL.superclustering_cff import *
 from RecoHGCal.TICL.ticlCandidateProducer_cfi import ticlCandidateProducer as _ticlCandidateProducer
+from RecoHGCal.TICL.mlpfProducer_cfi import mlpfProducer as _mlpfProducer
 
 from RecoHGCal.TICL.mtdSoAProducer_cfi import mtdSoAProducer as _mtdSoAProducer
 from Configuration.ProcessModifiers.ticlv5_TrackLinkingGNN_cff import ticlv5_TrackLinkingGNN
+from Configuration.ProcessModifiers.ticl_mlpf_cff import ticl_mlpf
 
 from Configuration.ProcessModifiers.ticl_superclustering_mustache_pf_cff import ticl_superclustering_mustache_pf
 from Configuration.ProcessModifiers.ticl_superclustering_mustache_ticl_cff import ticl_superclustering_mustache_ticl
@@ -107,6 +109,16 @@ ticlCandidate = _ticlCandidateProducer.clone(
     )
 )
 
+mlpfProducer = _mlpfProducer.clone(
+    tracks = cms.InputTag('generalTracks'),
+    gsfTracks = cms.InputTag('electronGsfTracks'),          # TODO: real collection once merged
+    hadTracksters = cms.InputTag('ticlTracksterLinks'),  # matches this cff's naming
+    emTracksters = cms.InputTag('ticlTracksterLinksSuperclusteringDNN'),
+    muons = cms.InputTag('muons1stStep'),
+    modelPath = cms.FileInPath('RecoHGCal/TICL/data/mlpf/mlpf_hgcal.onnx'),
+)
+
+
 ticlv5_TrackLinkingGNN.toModify(ticlCandidate,
         interpretationDescPSet = cms.PSet(
             onnxTrkLinkingModelFirstDisk = cms.FileInPath('RecoHGCal/TICL/data/ticlv5/onnx_models/TrackLinking_GNN/FirstDiskPropGNN_v0.onnx'),
@@ -172,9 +184,12 @@ mergeTICLTask = cms.Task(
 
 
 mtdSoATask = cms.Task(mtdSoA)
+
 ticlCandidateTask = cms.Task(ticlCandidate)
 
-
+mlpfProducerTask = cms.Task(mlpfProducer)
+ticl_mlpf.toReplaceWith(ticlCandidateTask, mlpfProducerTask)
+ticl_mlpf.toModify(pfTICL, ticlCandidateSrc=cms.InputTag('mlpfProducer'))
 
 # iterTICLTask default for v5
 iterTICLTask = cms.Task(

@@ -35,6 +35,7 @@
 <use name="TrackingTools/TrajectoryState"/>
 <use name="fastjet"/>
 <use name="RecoEgamma/EgammaElectronAlgos"/> 
+<use name="DataFormats/GsfTrackReco"/>
 <library file="*.cc" name="RecoHGCalTICLPlugins">
   <flags EDM_PLUGIN="1"/>
 </library>

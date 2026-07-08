@@ -1010,6 +1010,39 @@ upgradeWFs['ticlv5_TrackLinkingGNN'].step2 = {'--procModifiers': 'ticlv5_TrackLi
 upgradeWFs['ticlv5_TrackLinkingGNN'].step3 = {'--procModifiers': 'ticlv5_TrackLinkingGNN'}
 upgradeWFs['ticlv5_TrackLinkingGNN'].step4 = {'--procModifiers': 'ticlv5_TrackLinkingGNN'}
 
+class UpgradeWorkflow_ticl_mlpf(UpgradeWorkflow):
+    def setup_(self, step, stepName, stepDict, k, properties):
+        if ('Digi' in step and 'NoHLT' not in step) or ('HLTOnly' in step):
+            stepDict[stepName][k] = merge([self.step2, stepDict[step][k]])
+        if 'RecoGlobal' in step:
+            stepDict[stepName][k] = merge([self.step3, stepDict[step][k]])
+        if 'HARVESTGlobal' in step:
+            stepDict[stepName][k] = merge([self.step4, stepDict[step][k]])
+    def condition(self, fragment, stepList, key, hasHarvest):
+        selected_fragments = ["TTbar_14TeV", "CloseByP", "Eta1p7_2p7", "ZEE_14"]
+        return any(sf in fragment for sf in selected_fragments) and 'Run4' in key
+    
+upgradeWFs['ticl_mlpf'] = UpgradeWorkflow_ticl_mlpf(
+    steps = [
+        'HLTOnly',
+        'DigiTrigger',
+        'RecoGlobal',
+        'HARVESTGlobal'
+    ],
+    PU = [
+        'HLTOnly',
+        'DigiTrigger',
+        'RecoGlobal',
+        'HARVESTGlobal'
+    ],
+    suffix = '_ticl_mlpf',
+    offset = 0.212,
+)
+upgradeWFs['ticl_mlpf'].step2 = {'--procModifiers': 'ticl_mlpf'}
+upgradeWFs['ticl_mlpf'].step3 = {'--procModifiers': 'ticl_mlpf'}
+upgradeWFs['ticl_mlpf'].step4 = {'--procModifiers': 'ticl_mlpf'}
+
+
 # L3 Tracker Muon Outside-In reconstruction first
 class UpgradeWorkflow_phase2L3MuonsOIFirst(UpgradeWorkflow):
     def setup_(self, step, stepName, stepDict, k, properties):
@@ -1971,6 +2004,11 @@ upgradeWFs['HLTTiming75e33MTDatHLT'].suffix = '_HLT75e33TimingMTDatHLT'
 upgradeWFs['HLTTiming75e33MTDatHLT'].offset = 0.7522
 upgradeWFs['HLTTiming75e33MTDatHLT'].step2['--procModifiers'] = 'mtd_at_hlt'
 upgradeWFs['HLTTiming75e33MTDatHLT'].step3['--procModifiers'] = 'mtd_at_hlt'
+
+upgradeWFs['HLTTiming75e33TiclMLPF'] = deepcopy(upgradeWFs['HLTTiming75e33'])
+upgradeWFs['HLTTiming75e33TiclMLPF'].suffix = '_HLT75e33TimingTiclMLPF'
+upgradeWFs['HLTTiming75e33TiclMLPF'].offset = 0.7523
+upgradeWFs['HLTTiming75e33TiclMLPF'].step2['--procModifiers'] = 'ticl_mlpf'
 
 upgradeWFs['HLTTiming75e33LegacyTracking'] = deepcopy(upgradeWFs['HLTTiming75e33'])
 upgradeWFs['HLTTiming75e33LegacyTracking'].suffix = '_HLT75e33TimingLegacyTracking'
