@@ -109,7 +109,7 @@ ticlCandidate = _ticlCandidateProducer.clone(
     )
 )
 
-mlpfProducer = _mlpfProducer.clone(
+ticlmlpfCandidate = _mlpfProducer.clone(
     tracks = cms.InputTag('generalTracks'),
     gsfTracks = cms.InputTag('electronGsfTracks'),          # TODO: real collection once merged
     hadTracksters = cms.InputTag('ticlTracksterLinks'),  # matches this cff's naming
@@ -188,10 +188,10 @@ mtdSoATask = cms.Task(mtdSoA)
 ticlCandidateTask = cms.Task(ticlCandidate)
 
 def _use_mlpf_producer(task):
-    task.remove(ticlCandidateTask)
+    #task.remove(ticlCandidateTask)
     task.add(mlpfProducerTask)
 
-mlpfProducerTask = cms.Task(mlpfProducer)
+mlpfProducerTask = cms.Task(ticlmlpfCandidate)
 
 # iterTICLTask default for v5
 iterTICLTask = cms.Task(
@@ -202,7 +202,9 @@ iterTICLTask = cms.Task(
 )
 
 ticl_mlpf.toModify(iterTICLTask, func=_use_mlpf_producer)
-ticl_mlpf.toModify(pfTICL, ticlCandidateSrc=cms.InputTag('mlpfProducer'))
+#ticl_mlpf.toModify(pfTICL, ticlCandidateSrc=cms.InputTag('mlpfProducer'))
+
+#ticl_mlpf.toModify(iterTICLTask, func=lambda task: task.replace(ticlCandidateTask, mlpfProducerTask))
 
 
 # HFNose remains on legacy iterations
