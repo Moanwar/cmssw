@@ -8,6 +8,7 @@ from DPGAnalysis.HGCalNanoAOD.hgcalLayerClusters_cfi import *
 from DPGAnalysis.HGCalNanoAOD.hgcalGeneralTracks_cfi import *
 from DPGAnalysis.HGCalNanoAOD.hgcalGSFTracks_cfi import *
 from DPGAnalysis.HGCalNanoAOD.hgcalGen_cfi import *
+from DPGAnalysis.HGCalNanoAOD.hgcalTruthBranchAssociations_cfi import *
 
 ######################################
 # Offline HGCAL NanoAOD Tables
@@ -21,7 +22,7 @@ OfflineHGCalTables = cms.Sequence(
     + hgcalGSFTracksTableSequence
 )
 
-# Store additional validation objects 
+# Store additional validation objects
 OfflineHGCalValidationTables = cms.Sequence(
     hgcalTiclAssociationsTableSequence
     + hgcalSimTracksterSequence
@@ -29,6 +30,7 @@ OfflineHGCalValidationTables = cms.Sequence(
     + ticlSimCandidateExtraTable
     + hgcalLayerClustersTableSequence
     + hgcalGenSequence
+    + hgcalTruthBranchAssociationTableSequence
 )
 
 ######################################
