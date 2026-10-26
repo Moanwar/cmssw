@@ -45,7 +45,8 @@ namespace truth {
     CHadrons,
     ReconstructableFinalState,
     TauVisibleHadronic,
-    TauVisibleLeptonic
+    TauVisibleLeptonic,
+    PFReconstructable
   };
 
   // One row per level: the enum value, the bit it stamps on the graph, and the name a
@@ -60,7 +61,11 @@ namespace truth {
     char const* name;
   };
 
-  inline constexpr std::array<LevelRow, 12> kLevelTable = {
+  // PFReconstructable is appended last. Its walk reads ParticleData::hasTrackerSimHit/
+  // hasCaloSimHit/hasMuonSimHit directly (stamped by TruthLogicalGraphProducer, not by
+  // fillLevelFlags), so unlike HardProcess->PartonJets it has no ordering dependency on
+  // another row of this table -- it is just conventional to put it last.
+  inline constexpr std::array<LevelRow, 13> kLevelTable = {
       {{Level::StableLegsFromInitialState, LevelFlag::StableLegsFromInitialState, "stableLegsFromInitialState"},
        {Level::HardProcess, LevelFlag::HardProcess, "hardProcess"},
        {Level::StableDecayProducts, LevelFlag::StableDecayProducts, "stableDecayProducts"},
@@ -72,7 +77,8 @@ namespace truth {
        {Level::CHadrons, LevelFlag::CHadrons, "cHadrons"},
        {Level::ReconstructableFinalState, LevelFlag::ReconstructableFinalState, "reconstructableFinalState"},
        {Level::TauVisibleHadronic, LevelFlag::TauVisibleHadronic, "tauVisibleHadronic"},
-       {Level::TauVisibleLeptonic, LevelFlag::TauVisibleLeptonic, "tauVisibleLeptonic"}}};
+       {Level::TauVisibleLeptonic, LevelFlag::TauVisibleLeptonic, "tauVisibleLeptonic"},
+       {Level::PFReconstructable, LevelFlag::PFReconstructable, "pfReconstructable"}}};
 
   inline constexpr std::array<Level, kLevelTable.size()> kAllLevels = [] {
     std::array<Level, kLevelTable.size()> levels{};
@@ -412,6 +418,9 @@ namespace truth {
         // Recorded crossing the tracker-calorimeter boundary outward. Back-scattered
         // tracks crossed it inward and are the same particle coming back.
         return !data.backscattered && Particle(&graph, id).checkpoint(0).has_value();
+      case Level::PFReconstructable:
+        // A walk from the signal roots, answered by pfReconstructable().
+        return false;
     }
     return false;
   }
@@ -575,6 +584,114 @@ namespace truth {
   [[nodiscard]] inline std::vector<uint32_t> reconstructableFromSignal(Graph const& graph) {
     return detail::reconstructableLegsFrom(
         graph, [&graph](uint32_t p) { return graph.particles()[p].isAtLevel(LevelFlag::Signal); });
+  }
+
+  // The first particle of each signal chain that actually leaves a hit, walking down
+  // from every Signal root through GEN and SIM vertices alike. Species never terminates
+  // the walk, except a photon converting in the calorimeter stays one photon (see
+  // photonConvertsInCalo). Antichain by construction.
+  namespace detail {
+    [[nodiscard]] inline bool reachesDetector(ParticleData const& data) {
+      // Read the raw hit-count-thresholded fields directly, not via isAtLevel(): those
+      // flags do not exist as separate levels (PFReconstructable is the only exposed
+      // flag here), and even if they did, a Level's stamped bit is antichain-reduced
+      // (an ancestor that also qualifies would cover a descendant and drop its bit) --
+      // exactly the wrong semantics for a per-particle "did THIS particle leave a hit"
+      // test. hasTrackerSimHit/hasCaloSimHit are already thresholded (>=2, >=1 hits
+      // respectively) by TruthLogicalGraphProducer, so no further reduction belongs
+      // here. hasMuonSimHit additionally REQUIRES hasTrackerSimHit (see
+      // TruthLogicalGraphProducer's stamping loop): a muon-chamber hit confirms a
+      // track PF can match, it is not a substitute for one, so it never flips this OR
+      // on its own -- any particle with hasMuonSimHit already has hasTrackerSimHit.
+      // Kept as its own term anyway, both for readability (this is the muon pathway,
+      // not an unexplained duplicate of the tracker one) and because hasMuonSimHit is
+      // itself meaningful data beyond this one OR, e.g. for a dumper that reports WHY a
+      // particle counted as detected.
+      return data.hasTrackerSimHit || data.hasCaloSimHit || data.hasMuonSimHit;
+    }
+
+    // True if photonId's conversion subgraph has no tracker hit but does have a calo hit.
+    [[nodiscard]] inline bool photonConvertsInCalo(Graph const& graph, uint32_t photonId) {
+      const uint32_t nParticles = graph.nParticles();
+      std::vector<bool> seen(nParticles, false);
+      std::vector<uint32_t> stack{photonId};
+      seen[photonId] = true;
+      bool anyCalo = false;
+      while (!stack.empty()) {
+        const uint32_t id = stack.back();
+        stack.pop_back();
+        auto const& d = graph.particles()[id];
+        if (d.hasTrackerSimHit)
+          return false;
+        anyCalo = anyCalo || d.hasCaloSimHit;
+        for (const uint32_t vertexId : graph.decayVertices(id)) {
+          if (vertexId >= graph.nVertices())
+            continue;
+          for (const uint32_t child : graph.outgoingParticles(vertexId)) {
+            if (child < nParticles && !seen[child]) {
+              seen[child] = true;
+              stack.push_back(child);
+            }
+          }
+        }
+      }
+      return anyCalo;
+    }
+  }  // namespace detail
+
+  [[nodiscard]] inline std::vector<uint32_t> pfReconstructable(Graph const& graph) {
+    const uint32_t nParticles = graph.nParticles();
+    std::vector<uint32_t> legs;
+    std::vector<bool> seen(nParticles, false);
+    std::vector<uint32_t> stack;
+
+    for (uint32_t p = 0; p < nParticles; ++p) {
+      if (graph.particles()[p].isAtLevel(LevelFlag::Signal)) {
+        seen[p] = true;
+        stack.push_back(p);
+      }
+    }
+
+    while (!stack.empty()) {
+      const uint32_t p = stack.back();
+      stack.pop_back();
+      auto const& data = graph.particles()[p];
+
+      if (detail::reachesDetector(data)) {
+        // A synthetic particle is an accounting object with no trajectory, so it can
+        // never reach the detector and must not become a leg: the signal stand-in is
+        // Signal-flagged and vertex-less, and reachesDetector() is false for it anyway
+        // (no checkpoints, hasTrackerSimHit defaults to false), so this is defensive.
+        if (!isInvisible(data.pdgId) && !data.isSynthetic()) {
+          legs.push_back(p);
+        }
+        continue;
+      }
+
+      // A late calo conversion reads as one photon, not the e+/e- pair.
+      if (data.pdgId == 22 && !data.isSynthetic() && detail::photonConvertsInCalo(graph, p)) {
+        legs.push_back(p);
+        continue;
+      }
+
+      // Not yet detected: descend through EVERY decay vertex, GEN or SIM alike, the
+      // one deliberate difference from reconstructableLegsFrom's hasGen() filter.
+      for (const uint32_t vertexId : graph.decayVertices(p)) {
+        if (vertexId >= graph.nVertices()) {
+          continue;
+        }
+        for (const uint32_t child : graph.outgoingParticles(vertexId)) {
+          if (child < nParticles && !seen[child]) {
+            seen[child] = true;
+            stack.push_back(child);
+          }
+        }
+      }
+      // No further decay vertex and still undetected: a genuine dead end, so no leg here.
+    }
+
+    std::sort(legs.begin(), legs.end());
+    return legs;
   }
 
   // A particle with a GEN record and no GEN parent: a beam particle, a gun particle, or a
@@ -747,6 +864,11 @@ namespace truth {
     }
     if (level == Level::ReconstructableFromSignal) {
       std::vector<uint32_t> legs = reconstructableFromSignal(graph);
+      dropCoveredMembers(graph, legs, false);
+      return legs;
+    }
+    if (level == Level::PFReconstructable) {
+      std::vector<uint32_t> legs = pfReconstructable(graph);
       dropCoveredMembers(graph, legs, false);
       return legs;
     }
