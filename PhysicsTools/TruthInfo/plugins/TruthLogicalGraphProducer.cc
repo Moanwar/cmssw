@@ -304,17 +304,16 @@ public:
         verbosity_(cfg.getUntrackedParameter<unsigned>("verbosity")),
         postProcessor_(truth::TruthLogicalGraphPostProcessor::configFromPSet(
             cfg.getParameter<edm::ParameterSet>("postProcessing"))) {
-    // The hitless-subgraph pruning needs to know which SimTracks left a sim-hit;
-    // consume the same collections the hit-index producer uses, on every channel it
-    // indexes. A channel missing here is silently turned into deleted truth.
-    if (postProcessor_.config().dropHitlessSimSubgraphs) {
-      for (auto const& tag : cfg.getParameter<std::vector<edm::InputTag>>("simHitCollections"))
-        caloSimHitTokens_.push_back(consumes<std::vector<PCaloHit>>(tag));
-      for (auto const& tag : cfg.getParameter<std::vector<edm::InputTag>>("trackerSimHitCollections"))
-        trackerSimHitTokens_.push_back(consumes<edm::PSimHitContainer>(tag));
-      for (auto const& tag : cfg.getParameter<std::vector<edm::InputTag>>("muonSimHitCollections"))
-        trackerSimHitTokens_.push_back(consumes<edm::PSimHitContainer>(tag));
-    }
+    // hasTrackerSimHit/hasCaloSimHit/hasMuonSimHit (hence PFReconstructable) need these
+    // every event, so consumed unconditionally; mayConsume since a FastSim-style config
+    // may not run the SimHit producers at all. The pruning below reuses these same
+    // vectors.
+    for (auto const& tag : cfg.getParameter<std::vector<edm::InputTag>>("simHitCollections"))
+      caloSimHitTokens_.push_back(mayConsume<std::vector<PCaloHit>>(tag));
+    for (auto const& tag : cfg.getParameter<std::vector<edm::InputTag>>("trackerSimHitCollections"))
+      trackerSimHitTokens_.push_back(mayConsume<edm::PSimHitContainer>(tag));
+    for (auto const& tag : cfg.getParameter<std::vector<edm::InputTag>>("muonSimHitCollections"))
+      muonSimHitTokens_.push_back(mayConsume<edm::PSimHitContainer>(tag));
 
     produces<truth::Graph>();
   }
@@ -348,10 +347,11 @@ public:
                                           edm::InputTag("g4SimHits", "EcalHitsEB"),
                                           edm::InputTag("g4SimHits", "HcalHits")})
         ->setComment(
-            "Calorimeter PCaloHit collections used only to decide which SimTracks left a hit, for the "
-            "postProcessing.dropHitlessSimSubgraphs pruning. Covers endcap (HGCAL) and barrel (ECAL/HCAL) "
-            "so a particle is kept if it leaves a hit in any calorimeter. Matched via PCaloHit::geantTrackId(); "
-            "only the track id and energy are read, so no DetId relabelling is needed.");
+            "Calorimeter PCaloHit collections, used both to stamp ParticleData::hasCaloSimHit (>=1 hit, backing "
+            "LevelFlag::PFReconstructable) and, when postProcessing.dropHitlessSimSubgraphs is set, for that pruning. "
+            "Covers endcap (HGCAL) and barrel (ECAL/HCAL) so a particle is kept/flagged if it leaves a hit in "
+            "any calorimeter. Matched via PCaloHit::geantTrackId(); only the track id and energy are read, so "
+            "no DetId relabelling is needed.");
 
     desc.add<std::vector<edm::InputTag>>("trackerSimHitCollections",
                                          {edm::InputTag("g4SimHits", "TrackerHitsPixelBarrelLowTof"),
@@ -359,8 +359,9 @@ public:
                                           edm::InputTag("g4SimHits", "TrackerHitsPixelEndcapLowTof"),
                                           edm::InputTag("g4SimHits", "TrackerHitsPixelEndcapHighTof")})
         ->setComment(
-            "Tracker PSimHit collections used only to decide which SimTracks left a hit, for the "
-            "postProcessing.dropHitlessSimSubgraphs pruning. Matched to particles via PSimHit::trackId().");
+            "Tracker PSimHit collections, used both to stamp ParticleData::hasTrackerSimHit (>=2 hits, backing "
+            "LevelFlag::PFReconstructable) and, when postProcessing.dropHitlessSimSubgraphs is set, for that "
+            "pruning. Matched to particles via PSimHit::trackId().");
 
     desc.add<std::vector<edm::InputTag>>("muonSimHitCollections",
                                          {edm::InputTag("g4SimHits", "MuonDTHits"),
@@ -369,10 +370,11 @@ public:
                                           edm::InputTag("g4SimHits", "MuonGEMHits"),
                                           edm::InputTag("g4SimHits", "MuonME0Hits")})
         ->setComment(
-            "Muon-chamber PSimHit collections, same role as trackerSimHitCollections. Needed because the "
-            "hit index carries a Muon channel: a particle whose only hits are in the chambers, for instance "
-            "a punch-through secondary born past the calorimeters, would otherwise be pruned as hitless and "
-            "leave those indexed hits with no node.");
+            "Muon-chamber PSimHit collections, used to stamp ParticleData::hasMuonSimHit (>=1 hit AND "
+            "hasTrackerSimHit, backing LevelFlag::PFReconstructable -- a muon-chamber hit confirms a track PF "
+            "can actually match, it does not stand in for one) and, when postProcessing.dropHitlessSimSubgraphs "
+            "is set, for that pruning: a particle whose only hits are in the chambers would otherwise be pruned "
+            "as hitless.");
 
     desc.add<edm::ParameterSetDescription>("postProcessing", truth::TruthLogicalGraphPostProcessor::psetDescription())
         ->setComment("Logical graph post-processing configuration.");
@@ -910,18 +912,13 @@ public:
         vertex.reason = static_cast<uint8_t>(reason);
     }
 
-    // Per-particle sim-hit presence for the hitless-subgraph pruning. A logical
-    // particle is flagged when a calo or tracker sim-hit carries its SimTrack
-    // trackId with positive energy -- exactly how the LogicalGraphHitIndex
-    // attributes direct hits, so the pruned graph stays consistent with the
-    // index. Left empty (pruning disabled) when no sim-hit collection is present.
-    std::vector<uint8_t> particleDirectHit;
-
-    if (postProcessor_.config().dropHitlessSimSubgraphs) {
-      // trackId is event-local (each mixing sub-event reuses 1,2,3,...), so it MUST
-      // be namespaced by the packed EncodedEventId or signal and pileup collide and
-      // the wrong particles get flagged as hit-bearing. Mirrors the same key in
-      // LogicalGraphHitIndexBuilder so the pruned graph stays consistent with the index.
+    // trackId is event-local (each mixing sub-event reuses 1,2,3,...), so it MUST be
+    // namespaced by the packed EncodedEventId or signal and pileup collide and the wrong
+    // particles get flagged as hit-bearing. Mirrors the same key in
+    // LogicalGraphHitIndexBuilder so both this and the pruned graph below stay consistent
+    // with the index. Shared by the pruning block and the hasTrackerSimHit stamping
+    // below, which are otherwise independent of each other.
+    auto buildParticleOfKey = [&]() {
       std::unordered_map<uint64_t, uint32_t> particleOfKey;
       particleOfKey.reserve(out->nParticles());
       for (uint32_t particleId = 0; particleId < out->nParticles(); ++particleId) {
@@ -939,6 +936,83 @@ public:
         particleOfKey.emplace(truth::simObjectKey(raw.nodeEventId(simNodeU32), static_cast<uint32_t>(ref.key)),
                               particleId);
       }
+      return particleOfKey;
+    };
+
+    // Fills hasTrackerSimHit/hasCaloSimHit/hasMuonSimHit (the backing data for
+    // LevelFlag::PFReconstructable, see ParticleData.h), counting hits rather than just
+    // presence: Tracker needs >=2 hits, Calo only >=1. hasMuonSimHit additionally
+    // requires the tracker condition: PF only ever builds a muon candidate by matching a
+    // tracker track to muon-system segments, so a particle with muon-chamber hits but no
+    // real tracker trajectory (e.g. a punch-through secondary born past the calorimeter)
+    // is not something PF could identify as a muon, and must not count as detected via
+    // this path -- unlike hasCaloSimHit, which stays tracker-independent because PF
+    // builds neutral-particle candidates from calorimeter clusters alone, no track
+    // involved. Runs on every event, independent of the hitless-subgraph pruning config,
+    // since PFReconstructable always needs these.
+    {
+      const auto particleOfKey = buildParticleOfKey();
+      const uint32_t nParticles = out->nParticles();
+      std::vector<uint16_t> trackerHitCount(nParticles, 0);
+      std::vector<uint16_t> caloHitCount(nParticles, 0);
+      std::vector<uint16_t> muonHitCount(nParticles, 0);
+
+      for (auto const& token : trackerSimHitTokens_) {
+        edm::Handle<edm::PSimHitContainer> hHits;
+        evt.getByToken(token, hHits);
+        if (!hHits.isValid())
+          continue;
+        for (auto const& hit : *hHits) {
+          if (hit.energyLoss() <= 0.f)
+            continue;
+          auto it = particleOfKey.find(truth::simObjectKey(hit.eventId().rawId(), hit.trackId()));
+          if (it != particleOfKey.end())
+            ++trackerHitCount[it->second];
+        }
+      }
+      for (auto const& token : caloSimHitTokens_) {
+        edm::Handle<std::vector<PCaloHit>> hHits;
+        evt.getByToken(token, hHits);
+        if (!hHits.isValid())
+          continue;
+        for (auto const& hit : *hHits) {
+          const int trackId = hit.geantTrackId();
+          if (trackId <= 0 || hit.energy() <= 0.f)
+            continue;
+          auto it = particleOfKey.find(truth::simObjectKey(hit.eventId().rawId(), static_cast<uint32_t>(trackId)));
+          if (it != particleOfKey.end())
+            ++caloHitCount[it->second];
+        }
+      }
+      for (auto const& token : muonSimHitTokens_) {
+        edm::Handle<edm::PSimHitContainer> hHits;
+        evt.getByToken(token, hHits);
+        if (!hHits.isValid())
+          continue;
+        for (auto const& hit : *hHits) {
+          if (hit.energyLoss() <= 0.f)
+            continue;
+          auto it = particleOfKey.find(truth::simObjectKey(hit.eventId().rawId(), hit.trackId()));
+          if (it != particleOfKey.end())
+            ++muonHitCount[it->second];
+        }
+      }
+
+      for (uint32_t particleId = 0; particleId < nParticles; ++particleId) {
+        const bool hasTrackerSimHit = trackerHitCount[particleId] >= 2;
+        out->particles()[particleId].hasTrackerSimHit = hasTrackerSimHit;
+        out->particles()[particleId].hasCaloSimHit = caloHitCount[particleId] >= 1;
+        // Requires the tracker leg too: see the comment above this block.
+        out->particles()[particleId].hasMuonSimHit = hasTrackerSimHit && muonHitCount[particleId] >= 1;
+      }
+    }
+
+    // Per-particle sim-hit presence for the hitless-subgraph pruning, matching how
+    // LogicalGraphHitIndex attributes direct hits. Left empty when pruning is disabled.
+    std::vector<uint8_t> particleDirectHit;
+
+    if (postProcessor_.config().dropHitlessSimSubgraphs) {
+      const auto particleOfKey = buildParticleOfKey();
       std::vector<uint8_t> hasHit(out->nParticles(), 0);
       auto markHit = [&](uint64_t key) {
         if (auto it = particleOfKey.find(key); it != particleOfKey.end())
@@ -960,6 +1034,20 @@ public:
       }
 
       for (auto const& token : trackerSimHitTokens_) {
+        edm::Handle<edm::PSimHitContainer> hHits;
+        evt.getByToken(token, hHits);
+        if (!hHits.isValid())
+          continue;
+        anyCollectionValid = true;
+        for (auto const& hit : *hHits) {
+          if (hit.energyLoss() > 0.f)
+            markHit(truth::simObjectKey(hit.eventId().rawId(), hit.trackId()));
+        }
+      }
+
+      // Muon-chamber hits count the same as tracker hits here, just a separate vector
+      // now that hasTrackerSimHit and hasMuonSimHit need to be told apart.
+      for (auto const& token : muonSimHitTokens_) {
         edm::Handle<edm::PSimHitContainer> hHits;
         evt.getByToken(token, hHits);
         if (!hHits.isValid())
@@ -1055,6 +1143,7 @@ private:
   edm::EDGetTokenT<std::vector<uint32_t>> rawGenPayloadNodesToken_;
   std::vector<edm::EDGetTokenT<std::vector<PCaloHit>>> caloSimHitTokens_;
   std::vector<edm::EDGetTokenT<edm::PSimHitContainer>> trackerSimHitTokens_;
+  std::vector<edm::EDGetTokenT<edm::PSimHitContainer>> muonSimHitTokens_;
 
   bool mergeGenSimVertices_;
   unsigned verbosity_ = 0;
