@@ -1,9 +1,11 @@
 import FWCore.ParameterSet.Config as cms
 from PhysicsTools.NanoAOD.common_cff import *
 
-# Matches HGCAL tracksters and tracks to the truth graph (PhysicsTools/TruthInfo),
-# restricted to the ReconstructableFromSignal level: the first stable,
-# reconstructable particles the chosen signal resonance produced. Requires a RECO(-SIM)
+# Matches HGCAL tracksters, PFClusters, general tracks and GSF tracks to the truth graph
+# (PhysicsTools/TruthInfo), restricted to the PFReconstructable level: the first
+# particle of each signal decay/interaction chain that physically left a real signature
+# in the detector (TrackerSimHit, CaloSimHit or MuonSimHit), walking through BOTH GEN
+# decay vertices and SIM continuations -- see TruthLevels.h. Requires a RECO(-SIM)
 # job with the truth graph enabled, i.e. truthLogicalGraphProducer /
 # truthLogicalGraphHitIndexProducer already in the event (see
 # PhysicsTools.TruthInfo.addAdaptiveAssociator / customiseTruthMixedReco for how that
@@ -13,12 +15,30 @@ truthBranchAssociator = cms.EDProducer(
     graph=cms.InputTag("truthLogicalGraphProducer"),
     hitIndex=cms.InputTag("truthLogicalGraphHitIndexProducer"),
     layerClusters=cms.InputTag("hgcalMergeLayerClusters"),
-    rootLevel=cms.string("reconstructableFromSignal"),
+    rootLevel=cms.string("pfReconstructable"),
     tracksterCollections=cms.VInputTag(
         cms.InputTag("ticlTrackstersCLUE3DHigh"),
         cms.InputTag("ticlTracksterLinks"),
     ),
-    trackCollections=cms.VInputTag(cms.InputTag("generalTracks")),
+    # Barrel calorimeters ONLY: the endcap is HGCal, already covered by the trackster
+    # associators above, and particleFlowClusterHGCal would just duplicate that same
+    # calo-hit matching a second time. particleFlowClusterECAL (final/corrected) and
+    # particleFlowClusterHCAL (final, depth-merged from HBHE) are the standard barrel
+    # PFCluster collections everything downstream consumes. reco::PFCluster derives
+    # from reco::CaloCluster and carries its own (DetId, fraction) hits directly, so
+    # it is matched like a trackster -- shared calo-hit energy -- without needing a
+    # separate layerClusters handle.
+    pfClusterCollections=cms.VInputTag(
+        cms.InputTag("particleFlowClusterECAL"),
+        cms.InputTag("particleFlowClusterHCAL"),
+    ),
+    # Read as edm::View<reco::Track>: electronGsfTracks works here unchanged because
+    # reco::GsfTrack derives from reco::Track, matched by shared tracker hit count
+    # exactly like generalTracks.
+    trackCollections=cms.VInputTag(
+        cms.InputTag("generalTracks"),
+        cms.InputTag("electronGsfTracks"),
+    ),
 )
 
 # One row per truth branch root (same row numbering as the "index" field in every
@@ -29,6 +49,16 @@ truthBranchTable = cms.EDProducer(
     graph=cms.InputTag("truthLogicalGraphProducer"),
     roots=cms.InputTag("truthBranchAssociator", "truthBranchRoots"),
     name=cms.string("TruthBranch"),
+)
+
+# Truth-level PV: the signal interaction's Interaction-vertex position in the truth
+# graph (see TruthPVTableProducer.cc). Diagnostic only - never a model input, only
+# for validating offlinePrimaryVertices (hgcalPV_cfi.py) and any PV-relative features
+# built from it.
+truthPVTable = cms.EDProducer(
+    "TruthPVTableProducer",
+    graph=cms.InputTag("truthLogicalGraphProducer"),
+    name=cms.string("TruthPV"),
 )
 
 _truthBranchAssocLinkVars = cms.PSet(
@@ -63,49 +93,90 @@ def _truthBranchAssocTable(name, srcInstance, doc):
     )
 
 
-# CLUE3D tracksters <-> truth branch (ReconstructableFromSignal)
+# CLUE3D tracksters <-> truth branch (PFReconstructable)
 ticlTrackstersCLUE3DHighToTruthBranchTable = _truthBranchAssocTable(
     "TracksterCLUE3DHigh2TruthBranch",
     "ticlTrackstersCLUE3DHighToTruthBranch",
-    "CLUE3D tracksters matched to ReconstructableFromSignal truth branches, by shared HGCAL rechit energy.",
+    "CLUE3D tracksters matched to PFReconstructable truth branches, by shared HGCAL rechit energy.",
 )
 truthBranchToTiclTrackstersCLUE3DHighTable = _truthBranchAssocTable(
     "TruthBranch2TracksterCLUE3DHigh",
     "TruthBranchToticlTrackstersCLUE3DHigh",
-    "ReconstructableFromSignal truth branches matched to CLUE3D tracksters, by shared HGCAL rechit energy.",
+    "PFReconstructable truth branches matched to CLUE3D tracksters, by shared HGCAL rechit energy.",
 )
 
 # Linked tracksters (post TracksterLinksProducer) <-> truth branch
 ticlTracksterLinksToTruthBranchTable = _truthBranchAssocTable(
     "TracksterLinks2TruthBranch",
     "ticlTracksterLinksToTruthBranch",
-    "Linked tracksters matched to ReconstructableFromSignal truth branches, by shared HGCAL rechit energy.",
+    "Linked tracksters matched to PFReconstructable truth branches, by shared HGCAL rechit energy.",
 )
 truthBranchToTiclTracksterLinksTable = _truthBranchAssocTable(
     "TruthBranch2TracksterLinks",
     "TruthBranchToticlTracksterLinks",
-    "ReconstructableFromSignal truth branches matched to linked tracksters, by shared HGCAL rechit energy.",
+    "PFReconstructable truth branches matched to linked tracksters, by shared HGCAL rechit energy.",
+)
+
+# Barrel PFClusters <-> truth branch (ECAL and HCAL separately, each its own table pair)
+ecalPFClustersToTruthBranchTable = _truthBranchAssocTable(
+    "PFClusterECAL2TruthBranch",
+    "particleFlowClusterECALToTruthBranch",
+    "Barrel ECAL PFClusters matched to PFReconstructable truth branches, by shared rechit energy.",
+)
+truthBranchToEcalPFClustersTable = _truthBranchAssocTable(
+    "TruthBranch2PFClusterECAL",
+    "TruthBranchToparticleFlowClusterECAL",
+    "PFReconstructable truth branches matched to barrel ECAL PFClusters, by shared rechit energy.",
+)
+hcalPFClustersToTruthBranchTable = _truthBranchAssocTable(
+    "PFClusterHCAL2TruthBranch",
+    "particleFlowClusterHCALToTruthBranch",
+    "Barrel HCAL PFClusters matched to PFReconstructable truth branches, by shared rechit energy.",
+)
+truthBranchToHcalPFClustersTable = _truthBranchAssocTable(
+    "TruthBranch2PFClusterHCAL",
+    "TruthBranchToparticleFlowClusterHCAL",
+    "PFReconstructable truth branches matched to barrel HCAL PFClusters, by shared rechit energy.",
 )
 
 # General tracks <-> truth branch
 generalTracksToTruthBranchTable = _truthBranchAssocTable(
     "Track2TruthBranch",
     "generalTracksToTruthBranch",
-    "General tracks matched to ReconstructableFromSignal truth branches, by shared tracker hit count.",
+    "General tracks matched to PFReconstructable truth branches, by shared tracker hit count.",
 )
 truthBranchToGeneralTracksTable = _truthBranchAssocTable(
     "TruthBranch2Track",
     "TruthBranchTogeneralTracks",
-    "ReconstructableFromSignal truth branches matched to general tracks, by shared tracker hit count.",
+    "PFReconstructable truth branches matched to general tracks, by shared tracker hit count.",
+)
+
+# GSF tracks <-> truth branch
+gsfTracksToTruthBranchTable = _truthBranchAssocTable(
+    "GSFTrack2TruthBranch",
+    "electronGsfTracksToTruthBranch",
+    "GSF tracks matched to PFReconstructable truth branches, by shared tracker hit count.",
+)
+truthBranchToGsfTracksTable = _truthBranchAssocTable(
+    "TruthBranch2GSFTrack",
+    "TruthBranchToelectronGsfTracks",
+    "PFReconstructable truth branches matched to GSF tracks, by shared tracker hit count.",
 )
 
 hgcalTruthBranchAssociationTableSequence = cms.Sequence(
     truthBranchAssociator
     + truthBranchTable
+    + truthPVTable
     + ticlTrackstersCLUE3DHighToTruthBranchTable
     + truthBranchToTiclTrackstersCLUE3DHighTable
     + ticlTracksterLinksToTruthBranchTable
     + truthBranchToTiclTracksterLinksTable
+    + ecalPFClustersToTruthBranchTable
+    + truthBranchToEcalPFClustersTable
+    + hcalPFClustersToTruthBranchTable
+    + truthBranchToHcalPFClustersTable
     + generalTracksToTruthBranchTable
     + truthBranchToGeneralTracksTable
+    + gsfTracksToTruthBranchTable
+    + truthBranchToGsfTracksTable
 )

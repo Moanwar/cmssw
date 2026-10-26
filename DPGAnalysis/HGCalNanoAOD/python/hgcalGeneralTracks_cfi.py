@@ -6,6 +6,14 @@ trackMuonInfo = cms.EDProducer("TrackMuonInfoProducer",
     muons  = cms.InputTag("muons")
 )
 
+# dz/dxy w.r.t. the leading PV (offlinePrimaryVertices[0]). reco::Track::dz(Point)/
+# dxy(Point) take the vertex position as an external argument, so a plain Var()
+# string can't express this - see TrackPVInfoProducer.cc.
+trackPVInfo = cms.EDProducer("TrackPVInfoProducer",
+    tracks   = cms.InputTag("generalTracks"),
+    vertices = cms.InputTag("offlinePrimaryVertices"),
+)
+
 # General Tracks table for NanoAOD 
 generalTracksTable = cms.EDProducer(
     "SimpleTrackFlatTableProducer",
@@ -46,8 +54,14 @@ generalTracksTable = cms.EDProducer(
         muon_dt_hits = ExtVar(cms.InputTag("trackMuonInfo", "muonDtHits"),"int", doc="ST muon DT hits (-1 if no muon)"),
         muon_csc_hits = ExtVar(cms.InputTag("trackMuonInfo", "muonCscHits"), "int", doc="ST muon CSC hits (-1 if no muon)"),
         muon_type = ExtVar(cms.InputTag("trackMuonInfo", "muonType"), "int", doc="muon type (-1 if no muon)"),
+        pv_dz = ExtVar(cms.InputTag("trackPVInfo", "dz"), "float", doc="track dz w.r.t. the leading PV [cm]"),
+        pv_dxy = ExtVar(cms.InputTag("trackPVInfo", "dxy"), "float", doc="track dxy w.r.t. the leading PV [cm]"),
+        pv_dzError = ExtVar(cms.InputTag("trackPVInfo", "dzError"), "float",
+            doc="track dz uncertainty [cm] (from the track's own covariance; PV position uncertainty not propagated)"),
+        pv_dxyError = ExtVar(cms.InputTag("trackPVInfo", "dxyError"), "float",
+            doc="track dxy uncertainty [cm] (from the track's own covariance; PV position uncertainty not propagated)"),
     )
 )
 
 # Sequence for general tracks
-hgcalGeneralTracksTableSequence = cms.Sequence(trackMuonInfo + generalTracksTable)
+hgcalGeneralTracksTableSequence = cms.Sequence(trackMuonInfo + trackPVInfo + generalTracksTable)

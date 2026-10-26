@@ -7,6 +7,8 @@ from DPGAnalysis.HGCalNanoAOD.hgcalTICLSuperClusters_cfi import *
 from DPGAnalysis.HGCalNanoAOD.hgcalLayerClusters_cfi import *
 from DPGAnalysis.HGCalNanoAOD.hgcalGeneralTracks_cfi import *
 from DPGAnalysis.HGCalNanoAOD.hgcalGSFTracks_cfi import *
+from DPGAnalysis.HGCalNanoAOD.hgcalPFClusters_cfi import *
+from DPGAnalysis.HGCalNanoAOD.hgcalPV_cfi import *
 from DPGAnalysis.HGCalNanoAOD.hgcalGen_cfi import *
 from DPGAnalysis.HGCalNanoAOD.hgcalTruthBranchAssociations_cfi import *
 
@@ -20,6 +22,8 @@ OfflineHGCalTables = cms.Sequence(
     + ticlCandidateExtraTable
     + hgcalGeneralTracksTableSequence
     + hgcalGSFTracksTableSequence
+    + barrelPFClustersTableSequence
+    + hgcalPVTableSequence
 )
 
 # Store additional validation objects
@@ -31,6 +35,7 @@ OfflineHGCalValidationTables = cms.Sequence(
     + hgcalLayerClustersTableSequence
     + hgcalGenSequence
     + hgcalTruthBranchAssociationTableSequence
+    + barrelPFRecHitsTableSequence
 )
 
 ######################################

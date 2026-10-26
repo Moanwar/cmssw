@@ -1,7 +1,15 @@
 import FWCore.ParameterSet.Config as cms
 from PhysicsTools.NanoAOD.common_cff import *
 
-# GSF Tracks table for NanoAOD 
+# dz/dxy w.r.t. the leading PV (offlinePrimaryVertices[0]), same mechanism as
+# generalTracks' trackPVInfo in hgcalGeneralTracks_cfi.py - reco::GsfTrack derives
+# from reco::Track and inherits dz(Point)/dxy(Point) unchanged.
+gsfTrackPVInfo = cms.EDProducer("GsfTrackPVInfoProducer",
+    tracks   = cms.InputTag("electronGsfTracks"),
+    vertices = cms.InputTag("offlinePrimaryVertices"),
+)
+
+# GSF Tracks table for NanoAOD
 gsfTracksTable = cms.EDProducer(
     "SimpleGsfTrackFlatTableProducer",
     skipNonExistingSrc=cms.bool(True),
@@ -41,9 +49,17 @@ gsfTracksTable = cms.EDProducer(
         thetaModeError=Var("thetaModeError()", "float", doc="GSF track theta Mode Error"),
         qoverpMode=Var("qoverpMode()", "float", doc="GSF track qoverp Mode"),
         qoverpModeError=Var("qoverpModeError()", "float", doc="GSF track qoverp Mode Error"),
-        
+
+    ),
+    externalVariables = cms.PSet(
+        pv_dz = ExtVar(cms.InputTag("gsfTrackPVInfo", "dz"), "float", doc="GSF track dz w.r.t. the leading PV [cm]"),
+        pv_dxy = ExtVar(cms.InputTag("gsfTrackPVInfo", "dxy"), "float", doc="GSF track dxy w.r.t. the leading PV [cm]"),
+        pv_dzError = ExtVar(cms.InputTag("gsfTrackPVInfo", "dzError"), "float",
+            doc="GSF track dz uncertainty [cm] (from the track's own covariance; PV position uncertainty not propagated)"),
+        pv_dxyError = ExtVar(cms.InputTag("gsfTrackPVInfo", "dxyError"), "float",
+            doc="GSF track dxy uncertainty [cm] (from the track's own covariance; PV position uncertainty not propagated)"),
     ),
 )
 
 # Sequence for gsf tracks
-hgcalGSFTracksTableSequence = cms.Sequence(gsfTracksTable)
+hgcalGSFTracksTableSequence = cms.Sequence(gsfTrackPVInfo + gsfTracksTable)
