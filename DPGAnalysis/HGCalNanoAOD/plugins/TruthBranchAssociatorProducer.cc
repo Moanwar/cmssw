@@ -21,6 +21,7 @@
 #include "DataFormats/CaloRecHit/interface/CaloCluster.h"
 #include "DataFormats/Common/interface/View.h"
 #include "DataFormats/HGCalReco/interface/Trackster.h"
+#include "DataFormats/ParticleFlowReco/interface/PFCluster.h"
 #include "DataFormats/TrackReco/interface/Track.h"
 
 #include "SimDataFormats/Associations/interface/TICLAssociationMap.h"
@@ -46,6 +47,7 @@ private:
   const edm::EDGetTokenT<truth::LogicalGraphHitIndex> hitIndexToken_;
   const edm::EDGetTokenT<std::vector<reco::CaloCluster>> layerClustersToken_;
   std::vector<std::pair<std::string, edm::EDGetTokenT<std::vector<ticl::Trackster>>>> tracksterTokens_;
+  std::vector<std::pair<std::string, edm::EDGetTokenT<std::vector<reco::PFCluster>>>> pfClusterTokens_;
   std::vector<std::pair<std::string, edm::EDGetTokenT<edm::View<reco::Track>>>> trackTokens_;
   const truth::Level rootLevel_;
 };
@@ -72,6 +74,12 @@ TruthBranchAssociatorProducer::TruthBranchAssociatorProducer(edm::ParameterSet c
     produces<BranchAssociationMap>(label + "ToTruthBranch");
     produces<BranchAssociationMap>("TruthBranchTo" + label);
   }
+  for (auto const& tag : cfg.getParameter<std::vector<edm::InputTag>>("pfClusterCollections")) {
+    const std::string label = tagLabel(tag);
+    pfClusterTokens_.emplace_back(label, consumes<std::vector<reco::PFCluster>>(tag));
+    produces<BranchAssociationMap>(label + "ToTruthBranch");
+    produces<BranchAssociationMap>("TruthBranchTo" + label);
+  }
   for (auto const& tag : cfg.getParameter<std::vector<edm::InputTag>>("trackCollections")) {
     const std::string label = tagLabel(tag);
     trackTokens_.emplace_back(label, consumes<edm::View<reco::Track>>(tag));
@@ -95,33 +103,59 @@ void TruthBranchAssociatorProducer::produce(edm::StreamID, edm::Event& event, ed
 
   using truth::byAscendingScore;
 
-  if (!tracksterTokens_.empty()) {
-    auto const& layerClusters = event.get(layerClustersToken_);
+  if (!tracksterTokens_.empty() || !pfClusterTokens_.empty()) {
+    // Shared by both loops below: a PFCluster carries its own (DetId, fraction) hits
+    // directly (reco::PFCluster derives from reco::CaloCluster), so it needs no
+    // layerClusters handle the way a Trackster's vertex-index hits do.
     truth::BranchHitAssociator caloAssoc(hitIndex,
                                          roots,
                                          truth::BranchHitAssociator::Metric::SharedEnergy,
                                          truth::HitChannel::Calo,
                                          /*emptyRootsMeansAll=*/false);
 
-    for (auto const& [label, token] : tracksterTokens_) {
-      auto const& tracksters = event.get(token);
-      auto tracksterToBranch = std::make_unique<BranchAssociationMap>(static_cast<unsigned int>(tracksters.size()));
-      auto branchToTrackster = std::make_unique<BranchAssociationMap>(static_cast<unsigned int>(roots.size()));
+    if (!tracksterTokens_.empty()) {
+      auto const& layerClusters = event.get(layerClustersToken_);
+      for (auto const& [label, token] : tracksterTokens_) {
+        auto const& tracksters = event.get(token);
+        auto tracksterToBranch = std::make_unique<BranchAssociationMap>(static_cast<unsigned int>(tracksters.size()));
+        auto branchToTrackster = std::make_unique<BranchAssociationMap>(static_cast<unsigned int>(roots.size()));
 
-      for (unsigned int t = 0; t < tracksters.size(); ++t) {
-        const auto hits = truth::recoHits(tracksters[t], layerClusters);
+        for (unsigned int t = 0; t < tracksters.size(); ++t) {
+          const auto hits = truth::recoHits(tracksters[t], layerClusters);
+          if (hits.empty())
+            continue;
+          for (auto const& m : caloAssoc.bestBranches(std::span<const truth::RecoHit>(hits))) {
+            const uint32_t row = rootRow[m.rootParticleId];
+            tracksterToBranch->insert(t, row, m.sharedEnergy, m.score);
+            branchToTrackster->insert(row, t, m.sharedEnergy, m.reverseScore);
+          }
+        }
+        tracksterToBranch->sort(byAscendingScore);
+        branchToTrackster->sort(byAscendingScore);
+        event.put(std::move(tracksterToBranch), label + "ToTruthBranch");
+        event.put(std::move(branchToTrackster), "TruthBranchTo" + label);
+      }
+    }
+
+    for (auto const& [label, token] : pfClusterTokens_) {
+      auto const& pfClusters = event.get(token);
+      auto pfClusterToBranch = std::make_unique<BranchAssociationMap>(static_cast<unsigned int>(pfClusters.size()));
+      auto branchToPfCluster = std::make_unique<BranchAssociationMap>(static_cast<unsigned int>(roots.size()));
+
+      for (unsigned int t = 0; t < pfClusters.size(); ++t) {
+        const auto hits = truth::recoHits(pfClusters[t]);
         if (hits.empty())
           continue;
         for (auto const& m : caloAssoc.bestBranches(std::span<const truth::RecoHit>(hits))) {
           const uint32_t row = rootRow[m.rootParticleId];
-          tracksterToBranch->insert(t, row, m.sharedEnergy, m.score);
-          branchToTrackster->insert(row, t, m.sharedEnergy, m.reverseScore);
+          pfClusterToBranch->insert(t, row, m.sharedEnergy, m.score);
+          branchToPfCluster->insert(row, t, m.sharedEnergy, m.reverseScore);
         }
       }
-      tracksterToBranch->sort(byAscendingScore);
-      branchToTrackster->sort(byAscendingScore);
-      event.put(std::move(tracksterToBranch), label + "ToTruthBranch");
-      event.put(std::move(branchToTrackster), "TruthBranchTo" + label);
+      pfClusterToBranch->sort(byAscendingScore);
+      branchToPfCluster->sort(byAscendingScore);
+      event.put(std::move(pfClusterToBranch), label + "ToTruthBranch");
+      event.put(std::move(branchToPfCluster), "TruthBranchTo" + label);
     }
   }
 
@@ -166,7 +200,14 @@ void TruthBranchAssociatorProducer::fillDescriptions(edm::ConfigurationDescripti
           "antichain seeds the branch roots.");
   desc.add<std::vector<edm::InputTag>>(
       "tracksterCollections", {edm::InputTag("ticlTrackstersCLUE3DHigh"), edm::InputTag("ticlTracksterLinks")});
-  desc.add<std::vector<edm::InputTag>>("trackCollections", {edm::InputTag("generalTracks")});
+  desc.add<std::vector<edm::InputTag>>("pfClusterCollections", {})
+      ->setComment(
+          "std::vector<reco::PFCluster> collections, matched by shared calo-hit energy like a trackster "
+          "(reco::PFCluster derives from reco::CaloCluster and carries its own hits, no layerClusters needed).");
+  desc.add<std::vector<edm::InputTag>>("trackCollections", {edm::InputTag("generalTracks")})
+      ->setComment(
+          "Read as edm::View<reco::Track>, so a std::vector<reco::GsfTrack> collection (e.g. electronGsfTracks) "
+          "works here too -- reco::GsfTrack derives from reco::Track.");
   descriptions.add("truthBranchAssociator", desc);
 }
 
