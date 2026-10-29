@@ -34,14 +34,30 @@
 
 namespace truth {
 
+  // Appends the (detId, cell) entries of one TrackerSingleRecHit's cluster. Shared by the
+  // reco::Track adapter below (one call per valid single hit on the track) and by the
+  // standalone TrackerSingleRecHit adapter, so the two packings - pixel (row, column) and
+  // outer-tracker (firstRow + i, column) - stay written in one place.
+  inline void appendTrackerCells(TrackerSingleRecHit const& hit, std::vector<RecoHit>& hits) {
+    const uint32_t detId = hit.geographicalId().rawId();
+    if (hit.cluster_pixel().isNonnull()) {
+      for (auto const& pixel : hit.cluster_pixel()->pixels()) {
+        hits.push_back(RecoHit{.detId = detId, .cell = pixelCell(pixel.x, pixel.y)});
+      }
+    } else if (hit.cluster_phase2OT().isNonnull()) {
+      auto const& cluster = *hit.cluster_phase2OT();
+      const unsigned int column = cluster.column();
+      const unsigned int firstRow = cluster.firstRow();
+      for (unsigned int i = 0; i < cluster.size(); ++i) {
+        hits.push_back(RecoHit{.detId = detId, .cell = outerTrackerCell(firstRow + i, column)});
+      }
+    }
+  }
+
   // reco::Track -> its valid rechits (unit weight; tracker shared-hit metric). One entry
   // per cell of the hit's cluster, so the two sides compare the same objects. A hit that
   // carries no cluster names no cell, cannot match the cell-keyed tracker truth, and is
   // not emitted.
-  //
-  // The cluster type chooses the packing. A pixel cluster is a set of (row, column)
-  // pixels; an outer-tracker cluster is a run of `size()` consecutive strips in one
-  // column, starting at `firstRow()`.
   inline std::vector<RecoHit> recoHits(reco::Track const& track) {
     std::vector<RecoHit> hits;
     hits.reserve(track.recHitsSize());
@@ -57,20 +73,7 @@ namespace truth {
       if (trackerHitRTTI::rtti(*hit) != trackerHitRTTI::single) {
         continue;
       }
-      const uint32_t detId = hit->geographicalId().rawId();
-      auto const* single = static_cast<TrackerSingleRecHit const*>(hit);
-      if (single->cluster_pixel().isNonnull()) {
-        for (auto const& pixel : single->cluster_pixel()->pixels()) {
-          hits.push_back(RecoHit{.detId = detId, .cell = pixelCell(pixel.x, pixel.y)});
-        }
-      } else if (single->cluster_phase2OT().isNonnull()) {
-        auto const& cluster = *single->cluster_phase2OT();
-        const unsigned int column = cluster.column();
-        const unsigned int firstRow = cluster.firstRow();
-        for (unsigned int i = 0; i < cluster.size(); ++i) {
-          hits.push_back(RecoHit{.detId = detId, .cell = outerTrackerCell(firstRow + i, column)});
-        }
-      }
+      appendTrackerCells(static_cast<TrackerSingleRecHit const&>(*hit), hits);
     }
     // One entry per (DetId, cell), ascending, which is what the merge-join in
     // BranchHitAssociator requires. Two valid rechits can carry one geographicalId, and a
@@ -85,6 +88,21 @@ namespace truth {
                            hits.end(),
                            [](RecoHit const& a, RecoHit const& b) { return a.detId == b.detId && a.cell == b.cell; }),
                hits.end());
+    return hits;
+  }
+
+  // A single tracker rechit standing alone (e.g. siPixelRecHitsPreSplitting), matched
+  // directly instead of through a track: the cells of its own cluster, unit fraction.
+  // SiPixelRecHit and the outer-tracker single rechit both derive from
+  // TrackerSingleRecHit, so one adapter serves either, chosen by the domain's
+  // recoCollections product type.
+  inline std::vector<RecoHit> recoHits(TrackerSingleRecHit const& hit) {
+    std::vector<RecoHit> hits;
+    if (!hit.isValid()) {
+      return hits;
+    }
+    appendTrackerCells(hit, hits);
+    std::sort(hits.begin(), hits.end(), [](RecoHit const& a, RecoHit const& b) { return a.cell < b.cell; });
     return hits;
   }
 

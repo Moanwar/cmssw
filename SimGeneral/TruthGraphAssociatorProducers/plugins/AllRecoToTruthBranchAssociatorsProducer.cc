@@ -37,12 +37,14 @@
 #include "FWCore/Utilities/interface/Exception.h"
 
 #include "DataFormats/CaloRecHit/interface/CaloCluster.h"
+#include "DataFormats/Common/interface/DetSetVectorNew.h"
 #include "DataFormats/HGCRecHit/interface/HGCRecHitCollections.h"
 #include "DataFormats/ParticleFlowReco/interface/PFRecHit.h"
 #include "DataFormats/ParticleFlowReco/interface/PFRecHitFwd.h"
 #include "DataFormats/DetId/interface/DetId.h"
 #include "DataFormats/HGCalReco/interface/Trackster.h"
 #include "DataFormats/TrackReco/interface/Track.h"
+#include "DataFormats/TrackerRecHit2D/interface/SiPixelRecHit.h"
 #include "DataFormats/VertexReco/interface/Vertex.h"
 #include "DataFormats/ParticleFlowReco/interface/PFCluster.h"
 #include "SimDataFormats/Associations/interface/TICLAssociationMap.h"
@@ -196,6 +198,19 @@ namespace {
     static constexpr const char* cfiName = "truthBranchPFClusterAssociators";
   };
 
+  // A bare pixel rechit (siPixelRecHitsPreSplitting), matched directly instead of
+  // through a track: same channel and metric as reco::Track (shared hits on the
+  // tracker's cell-keyed index), because the RecoHitAdapters overload it shares with
+  // the track's own single-hit extraction packs the same (detId, cell).
+  template <>
+  struct TruthAssociationTraits<SiPixelRecHit> {
+    static constexpr auto strategy = AssociationStrategy::HitBased;
+    using MapType = ticl::TICLAssociationMap<ticl::mapWithSharedEnergyAndScore>;
+    static constexpr truth::HitChannel channel = truth::HitChannel::Tracker;
+    static constexpr auto metric = truth::BranchHitAssociator::Metric::SharedHits;
+    static constexpr const char* cfiName = "truthBranchSiPixelRecHitAssociators";
+  };
+
   // A trackster owns calorimeter energy through its layer clusters, so it is matched
   // directly like a track, but on SHARED ENERGY in the calorimeter channel rather than
   // on a hit count in the tracker. This is the same metric the TICL trackster
@@ -239,6 +254,43 @@ namespace {
   template <typename RECO>
   concept RecHitWeightedDomain =
       HitBasedDomain<RECO> && TruthAssociationTraits<RECO>::metric == truth::BranchHitAssociator::Metric::SharedEnergy;
+
+  // A domain's own EDM storage: std::vector<RECO> for most (reco::Track, reco::Vertex,
+  // ...), but a bare tracker rechit is an edmNew::DetSetVector - which, unlike the
+  // legacy edm::DetSetVector, has no view-fill specialization, so it cannot be
+  // consumed as an edm::View<RECO> the way the other domains are.
+  template <typename RECO>
+  struct RecoCollectionTraits {
+    using CollectionType = std::vector<RECO>;
+  };
+
+  template <>
+  struct RecoCollectionTraits<SiPixelRecHit> {
+    using CollectionType = edmNew::DetSetVector<SiPixelRecHit>;
+  };
+
+  // Flat (pointer) access over either storage, so the per-object loop below does not
+  // need to know which one a domain has.
+  template <typename RECO>
+  std::vector<RECO const*> flattenRecoCollection(std::vector<RECO> const& collection) {
+    std::vector<RECO const*> flat;
+    flat.reserve(collection.size());
+    for (auto const& obj : collection) {
+      flat.push_back(&obj);
+    }
+    return flat;
+  }
+
+  template <typename RECO>
+  std::vector<RECO const*> flattenRecoCollection(edmNew::DetSetVector<RECO> const& collection) {
+    std::vector<RECO const*> flat;
+    for (auto const& detSet : collection) {
+      for (auto const& obj : detSet) {
+        flat.push_back(&obj);
+      }
+    }
+    return flat;
+  }
 }  // namespace
 
 template <typename RECO>
@@ -269,7 +321,8 @@ private:
   mutable std::once_flag moduleKeyedWarned_;
   mutable std::once_flag placeholderVertexWarned_;
 
-  std::vector<std::pair<std::string, edm::EDGetTokenT<std::vector<RECO>>>> recoTokens_;
+  using RecoCollection = typename RecoCollectionTraits<RECO>::CollectionType;
+  std::vector<std::pair<std::string, edm::EDGetTokenT<RecoCollection>>> recoTokens_;
   // One warning per collection per job when none of its hits is in the configured
   // denominator scope, because every shared-energy fraction is then zero, which reads
   // like a reconstruction that matches nothing. A barrel trackster collection under an
@@ -387,7 +440,7 @@ AllRecoToTruthBranchAssociatorsProducer<RECO>::AllRecoToTruthBranchAssociatorsPr
     if (!tag.instance().empty()) {
       key += "_" + tag.instance();
     }
-    recoTokens_.emplace_back(key, consumes<std::vector<RECO>>(tag));
+    recoTokens_.emplace_back(key, consumes<RecoCollection>(tag));
 
     if constexpr (ConstituentBasedDomain<RECO>) {
       // One constituent map per working point, in the same order as workingPoints_.
@@ -641,7 +694,7 @@ void AllRecoToTruthBranchAssociatorsProducer<RECO>::produce(edm::StreamID,
 
   for (std::size_t collectionIndex = 0; collectionIndex < recoTokens_.size(); ++collectionIndex) {
     auto const& [key, token] = recoTokens_[collectionIndex];
-    auto const& collection = event.get(token);
+    const auto collection = flattenRecoCollection(event.get(token));
     const unsigned int nReco = collection.size();
 
     // Truth-driven direction, built ONCE: the truth target is fixed a priori, so the
@@ -656,9 +709,9 @@ void AllRecoToTruthBranchAssociatorsProducer<RECO>::produce(edm::StreamID,
       recoHitsPerObject.resize(nReco);
       for (unsigned int i = 0; i < nReco; ++i) {
         if constexpr (LayerClusterBackedRecoHits<RECO>) {
-          recoHitsPerObject[i] = truth::recoHits(collection[i], *layerClusters);
+          recoHitsPerObject[i] = truth::recoHits(*collection[i], *layerClusters);
         } else {
-          recoHitsPerObject[i] = truth::recoHits(collection[i]);
+          recoHitsPerObject[i] = truth::recoHits(*collection[i]);
         }
       }
       if constexpr (Traits::metric == truth::BranchHitAssociator::Metric::SharedEnergy) {
@@ -714,7 +767,7 @@ void AllRecoToTruthBranchAssociatorsProducer<RECO>::produce(edm::StreamID,
         // purity.
         auto const& constituentMap = event.get(constituentMapTokens_[collectionIndex][wpIndex]);
         for (unsigned int i = 0; i < nReco; ++i) {
-          auto const& object = collection[i];
+          auto const& object = *collection[i];
           // Summed in its own pass, not fused into the scan below: fusing changes the
           // inlining context of the float accumulation and with it the rounding of the
           // pt^2 sums, which moves association scores in the last ulp.
@@ -986,3 +1039,5 @@ using TruthBranchTracksterAssociatorsProducer = AllRecoToTruthBranchAssociatorsP
 DEFINE_FWK_MODULE(TruthBranchTracksterAssociatorsProducer);
 using TruthBranchPFClusterAssociatorsProducer = AllRecoToTruthBranchAssociatorsProducer<reco::PFCluster>;
 DEFINE_FWK_MODULE(TruthBranchPFClusterAssociatorsProducer);
+using TruthBranchSiPixelRecHitAssociatorsProducer = AllRecoToTruthBranchAssociatorsProducer<SiPixelRecHit>;
+DEFINE_FWK_MODULE(TruthBranchSiPixelRecHitAssociatorsProducer);

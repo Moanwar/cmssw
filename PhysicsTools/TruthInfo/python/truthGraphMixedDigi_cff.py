@@ -90,6 +90,13 @@ truthLogicalGraphProducer = _truthLogicalGraphProducer.clone(
 )
 truthLogicalGraphProducer.postProcessing.reconstructablePdgIds = cms.vint32(*reconstructablePdgIds)
 
+# The RECO-step base clone (Validation/Configuration/python/truthPrevalidation_cff.py,
+# outside this package) still sets a stale "doHGCalRelabelling": the producer was
+# renamed to doHcalRelabelling below without updating that caller, so the base clone's
+# own value has to be dropped or the renamed parameter below becomes an addition
+# instead of an override and both reach the producer, one of them illegal.
+del _truthLogicalGraphHitIndexProducer.doHGCalRelabelling
+
 truthLogicalGraphHitIndexProducer = _truthLogicalGraphHitIndexProducer.clone(
     src=cms.InputTag("truthLogicalGraphProducer"),
     rawSrc=cms.InputTag("mix"),

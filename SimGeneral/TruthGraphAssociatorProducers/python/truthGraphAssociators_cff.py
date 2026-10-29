@@ -84,6 +84,19 @@ allTrackToTruthBranchAssociators = cms.EDProducer(
     **_workingPointArgs,
 )
 
+# Hit-based, directly on a bare pixel rechit: no track required, so this is the one
+# domain that can run right at the DIGI step, alongside the truth graph itself, before
+# tracking exists. Same channel and metric as the track domain (shared cells on the
+# tracker's cell-keyed index).
+truthBranchSiPixelRecHitAssociators = cms.EDProducer(
+    "TruthBranchSiPixelRecHitAssociatorsProducer",
+    recoCollections=_tags("pixelRecHits"),
+    targetsSrc=cms.InputTag("truthBranchTargets", "selectedRoots"),
+    assignableTargetsSrc=cms.InputTag("truthBranchTargets", "assignableRoots"),
+    **_truthSources,
+    **_workingPointArgs,
+)
+
 # Constituent-based: a vertex has no hits of its own, its truth is aggregated from the
 # tracks it is built from, which the track associator has already matched.
 allVertexToTruthBranchAssociators = cms.EDProducer(
@@ -189,3 +202,9 @@ truthGraphAssociatorsSequence = cms.Sequence(
 truthGraphHltAssociatorsSequence = cms.Sequence(
     hltTrackToTruthBranchAssociators + hltTruthBranchTracksterAssociators + hltVertexToTruthBranchAssociators
 )
+
+# DIGI-step use: the only domain available before tracking exists is the bare pixel
+# rechit, matched directly. Kept apart from truthGraphAssociatorsSequence so a RECO-step
+# job does not also pay for this domain via a plain import; a job that wants it there
+# too just adds truthBranchSiPixelRecHitAssociators to that sequence instead.
+truthGraphDigiAssociatorsSequence = cms.Sequence(truthBranchTargets + truthBranchSiPixelRecHitAssociators)

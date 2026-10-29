@@ -37,6 +37,10 @@ truthGraphRecoLabelsPSet = cms.PSet(
     tracks=cms.vstring("generalTracks"),
     vertices=cms.vstring("offlinePrimaryVertices"),
     secondaryVertices=cms.vstring("inclusiveSecondaryVertices"),
+    # A bare pixel rechit domain, matched directly instead of through a track. Pre-split:
+    # the only pixel rechit a DIGI-step job can see, since the jet-core re-splitting runs
+    # downstream in RECO, after tracking and vertexing.
+    pixelRecHits=cms.vstring("siPixelRecHitsPreSplitting"),
     # Particle-flow clusters, one domain per subdetector because the shared-energy
     # denominator of an associator module is one detector mask, and the efficiency gate
     # is the branch energy fraction in THAT detector. These are the calorimeter
