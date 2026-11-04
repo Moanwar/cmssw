@@ -61,5 +61,87 @@ gsfTracksTable = cms.EDProducer(
     ),
 )
 
+# reco::GsfElectron, one level up from the plain GsfTrack: carries the electron-ID DNN
+# scores and the track<->SuperCluster matching quantities that live only on the
+# electron candidate, never on reco::GsfTrack itself. gedGsfElectronsTmp is the exact
+# collection RecoParticleFlow/PFProducer/plugins/MLPFProducer.cc itself reads for these
+# same quantities (hardcoded InputTag there, not configurable), so this table is built
+# from the same source MLPF's own gsf_electronseed_dnn1..5 come from. Isolation-sum
+# variables (dr03/dr04 cone sums) are deliberately left out here: a separate, heavier
+# topic (activity around the electron) from the identification/kinematic features below.
+gsfElectronsTable = cms.EDProducer(
+    "SimpleGsfElectronFlatTableProducer",
+    skipNonExistingSrc=cms.bool(True),
+    src=cms.InputTag("gedGsfElectronsTmp"),
+    cut=cms.string(""),
+    name=cms.string("GsfElectron"),
+    doc=cms.string("GSF electrons (gedGsfElectronsTmp)"),
+    extension=cms.bool(False),
+    variables=cms.PSet(
+        # Basic kinematics
+        pt=Var("pt()", "float", doc="GSF electron p_T [GeV]"),
+        eta=Var("eta()", "float", doc="GSF electron pseudorapidity"),
+        phi=Var("phi()", "float", doc="GSF electron phi angle [rad]"),
+        energy=Var("energy()", "float", doc="GSF electron energy [GeV]"),
+        charge=Var("charge()", "int", doc="GSF electron charge"),
+        vx=Var("vx()", "float", doc="GSF electron vertex x [cm]"),
+        vy=Var("vy()", "float", doc="GSF electron vertex y [cm]"),
+        vz=Var("vz()", "float", doc="GSF electron vertex z [cm]"),
+
+        # Link back to the GSFTrack table (electronGsfTracks): same collection
+        # gedGsfElectronsTmp's own GsfTrackRef points into, so .key() is the row index
+        # directly, the same way MLPFModel.cc matches "ref == gsfEle.gsfTrack()".
+        gsfTrackIndex=Var("gsfTrack().key()", "int", doc="Index into the GSFTrack table"),
+
+        # Electron-ID DNN scores (RecoEgamma/EgammaElectronProducers' GsfElectronProducer),
+        # the quantities MLPFModel.cc's gsf_electronseed_dnn1..5 are read from directly.
+        dnnSignalIsolated=Var("dnn_signal_Isolated()", "float", doc="Electron-ID DNN: signal, isolated"),
+        dnnSignalNonIsolated=Var("dnn_signal_nonIsolated()", "float", doc="Electron-ID DNN: signal, non-isolated"),
+        dnnBkgNonIsolated=Var("dnn_bkg_nonIsolated()", "float", doc="Electron-ID DNN: background, non-isolated"),
+        dnnBkgTau=Var("dnn_bkg_Tau()", "float", doc="Electron-ID DNN: background, tau"),
+        dnnBkgPhoton=Var("dnn_bkg_Photon()", "float", doc="Electron-ID DNN: background, photon"),
+
+        # Seeding and charge consistency
+        ecalDrivenSeed=Var("ecalDrivenSeed()", "bool", doc="Electron seed found by the ECAL-driven algorithm"),
+        trackerDrivenSeed=Var("trackerDrivenSeed()", "bool", doc="Electron seed found by the tracker-driven algorithm"),
+        scPixCharge=Var("scPixCharge()", "int", doc="Charge estimate from the SuperCluster/pixel-hit pattern"),
+        isGsfCtfChargeConsistent=Var("isGsfCtfChargeConsistent()", "bool",
+            doc="GSF and CTF track charges agree"),
+        isGsfScPixChargeConsistent=Var("isGsfScPixChargeConsistent()", "bool",
+            doc="GSF track and SC/pixel charge estimate agree"),
+        isGsfCtfScPixChargeConsistent=Var("isGsfCtfScPixChargeConsistent()", "bool",
+            doc="GSF, CTF and SC/pixel charge estimates all agree"),
+
+        # Track<->cluster matching, the standard electron-identification shower-shape
+        # variables, evaluated at the GSF track's innermost (vertex) and outermost
+        # (calo-extrapolated) states.
+        eSuperClusterOverP=Var("eSuperClusterOverP()", "float",
+            doc="SuperCluster energy / track momentum at the PCA to the beam spot"),
+        eSeedClusterOverP=Var("eSeedClusterOverP()", "float",
+            doc="Seed cluster energy / track momentum at the PCA to the beam spot"),
+        eSeedClusterOverPout=Var("eSeedClusterOverPout()", "float",
+            doc="Seed cluster energy / track momentum at calo, from the outermost track state"),
+        eEleClusterOverPout=Var("eEleClusterOverPout()", "float",
+            doc="Electron cluster energy / track momentum at calo, from the outermost track state"),
+        deltaEtaSuperClusterTrackAtVtx=Var("deltaEtaSuperClusterTrackAtVtx()", "float",
+            doc="SuperCluster eta - track eta at calo, from the innermost track state"),
+        deltaPhiSuperClusterTrackAtVtx=Var("deltaPhiSuperClusterTrackAtVtx()", "float",
+            doc="SuperCluster phi - track phi at calo, from the innermost track state"),
+        deltaEtaSeedClusterTrackAtCalo=Var("deltaEtaSeedClusterTrackAtCalo()", "float",
+            doc="Seed cluster eta - track eta at calo, from the outermost track state"),
+        deltaPhiSeedClusterTrackAtCalo=Var("deltaPhiSeedClusterTrackAtCalo()", "float",
+            doc="Seed cluster phi - track phi at calo, from the outermost track state"),
+        deltaEtaEleClusterTrackAtCalo=Var("deltaEtaEleClusterTrackAtCalo()", "float",
+            doc="Electron cluster eta - track eta at calo, from the outermost track state"),
+        deltaPhiEleClusterTrackAtCalo=Var("deltaPhiEleClusterTrackAtCalo()", "float",
+            doc="Electron cluster phi - track phi at calo, from the outermost track state"),
+
+        # Fiducial region
+        isEB=Var("isEB()", "bool", doc="In the ECAL barrel"),
+        isEE=Var("isEE()", "bool", doc="In the ECAL endcap"),
+        isGap=Var("isGap()", "bool", doc="In a barrel/endcap or intra-module crack"),
+    ),
+)
+
 # Sequence for gsf tracks
-hgcalGSFTracksTableSequence = cms.Sequence(gsfTrackPVInfo + gsfTracksTable)
+hgcalGSFTracksTableSequence = cms.Sequence(gsfTrackPVInfo + gsfTracksTable + gsfElectronsTable)
